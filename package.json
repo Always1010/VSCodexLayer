@@ -7,6 +7,10 @@
   "engines": { "node": ">=22" },
   "scripts": {
     "test:patch": "node --test tests/patch-engine.test.mjs",
+    "test:host": "node --test tests/host.test.mjs tests/bootstrap.test.mjs",
+    "test:navigation": "node --test tests/navigation.test.mjs",
+    "check:adapter": "node tools/check-adapter.mjs",
+    "check:ui": "node tools/check-ui.mjs",
     "layer": "node tools/layer.mjs"
   }
 }
