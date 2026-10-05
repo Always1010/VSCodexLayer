@@ -42,9 +42,8 @@ class Navigation {
     const header = element('div', 'vcl-header');
     header.append(element('strong', 'vcl-heading', '项目聊天'));
     this.refreshButton = iconButton('refresh', '刷新聊天列表', () => this.refresh());
-    const toggle = iconButton('panel', '收起或展开项目导航', () => {
-      this.state.collapsed = !this.isCollapsed(); this.layout(); this.persist();
-    });
+    const toggle = iconButton('panel', '收起或展开项目导航 (Alt+/)', () => this.toggleNavigation());
+    toggle.setAttribute('aria-keyshortcuts', 'Alt+/');
     toggle.id = 'vcl-toggle'; header.append(this.refreshButton, toggle);
     const controls = element('div', 'vcl-controls');
     const selectLabel = element('label', 'vcl-sr-only', '显示项目范围'); selectLabel.htmlFor = 'vcl-mode';
@@ -90,15 +89,27 @@ class Navigation {
     }));
     const resize = () => this.layout(); window.addEventListener('resize', resize);
     this.cleanups.push(() => window.removeEventListener('resize', resize));
+    const keydown = (event) => {
+      if (event.defaultPrevented || event.isComposing || !event.altKey || event.ctrlKey || event.metaKey || event.shiftKey
+        || (event.key !== '/' && event.code !== 'Slash')) return;
+      event.preventDefault(); event.stopImmediatePropagation();
+      if (!event.repeat) this.toggleNavigation();
+    };
+    window.addEventListener('keydown', keydown, true);
+    this.cleanups.push(() => window.removeEventListener('keydown', keydown, true));
     this.layout(); this.render(); this.refresh();
   }
   isCollapsed() { return this.state.collapsed ?? window.innerWidth < 640; }
+  toggleNavigation() {
+    this.state.collapsed = !this.isCollapsed(); this.layout(); this.persist();
+    if (this.state.collapsed && this.rail.contains(document.activeElement)) this.rail.querySelector('#vcl-toggle').focus();
+  }
   layout() {
     if (this.disposed) return;
     const collapsed = this.isCollapsed();
     const width = collapsed ? 42 : Math.max(180, Math.min(this.state.width, window.innerWidth - 280));
     document.body.style.setProperty('--vcl-rail-width', `${width}px`); this.rail.classList.toggle('vcl-collapsed', collapsed);
-    const toggle = this.rail.querySelector('#vcl-toggle'); toggle.title = collapsed ? '展开项目导航' : '收起项目导航';
+    const toggle = this.rail.querySelector('#vcl-toggle'); toggle.title = `${collapsed ? '展开' : '收起'}项目导航 (Alt+/)`;
     toggle.setAttribute('aria-label', toggle.title); toggle.setAttribute('aria-expanded', String(!collapsed));
     this.resizeHandle.setAttribute('aria-valuenow', String(Math.round(width)));
   }
