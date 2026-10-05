@@ -1,4 +1,5 @@
 body.vcl-enabled { --vcl-rail-width: 250px; }
+body.vcl-enabled [data-vcl-home-history] { display: none !important; }
 body.vcl-enabled > #root {
   position: absolute !important;
   inset: 0 0 0 var(--vcl-rail-width) !important;

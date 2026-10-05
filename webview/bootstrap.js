@@ -5,6 +5,7 @@
   const subscribers = new Set();
   let nativeApi;
   let nativeReady = false;
+  let newChatHandler;
   let route = document.querySelector('meta[name="initial-route"]')?.content ?? '/';
   let notifyQueued = false;
   const notify = () => {
@@ -22,6 +23,17 @@
       if (typeof path === 'string' && path !== route) { route = path; notify(); }
     },
     subscribe(callback) { subscribers.add(callback); notify(); return () => subscribers.delete(callback); },
+    setNewChatHandler(handler) {
+      newChatHandler = handler;
+      return () => { if (newChatHandler === handler) newChatHandler = undefined; };
+    },
+    resumeDraft(options) {
+      if (!nativeReady || !newChatHandler) return false;
+      // Explicit prefills, project selections and other specialized actions remain native.
+      if (options != null && (typeof options !== 'object' || Object.entries(options).some(([key, value]) =>
+        value !== undefined && !['selectChat', 'startInSidebar', 'replace', 'onNavigate', 'freshDraft'].includes(key)))) return false;
+      try { newChatHandler(); return true; } catch { return false; }
+    },
     postMessage(message) {
       if (!nativeApi || !nativeReady) throw new Error('官方聊天页面尚未就绪。');
       return nativeApi.postMessage(message);

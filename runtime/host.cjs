@@ -87,6 +87,11 @@ exports.createLayerHost = function createLayerHost({ vscode, provider, webview, 
       provider.postMessageToWebview(webview, { type: 'navigate-to-route', path: `/local/${params.threadId}` });
       return { threadId: params.threadId };
     }
+    if (method === 'new-chat') {
+      if (!['/', '/extension/panel/new'].includes(params.path)) throw new Error('空白聊天入口无效。');
+      provider.postMessageToWebview(webview, { type: 'navigate-to-route', path: params.path });
+      return { path: params.path };
+    }
     if (method === 'save-state') {
       await provider.globalState.update(STATE_KEY, cleanState(params.state));
       return { saved: true };
