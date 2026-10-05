@@ -1,4 +1,7 @@
 const { randomUUID } = require('node:crypto');
+const fs = require('node:fs/promises');
+const path = require('node:path');
+const { constants } = require('node:fs');
 
 const REQUEST = 'vscodex-layer/request';
 const RESPONSE = 'vscodex-layer/response';
@@ -71,6 +74,17 @@ exports.createLayerHost = function createLayerHost({ vscode, provider, webview, 
       } catch (error) { clearTimeout(timer); pending.delete(id); reject(error); }
     });
   }
+  async function validateProject(cwd) {
+    if (typeof cwd !== 'string' || !cwd || cwd.length > 4096 || cwd.includes('\0') || !path.isAbsolute(cwd)) {
+      throw new Error('项目必须具有有效的本地绝对目录。');
+    }
+    const directory = path.resolve(cwd);
+    try {
+      if (!(await fs.stat(directory)).isDirectory()) throw new Error('not a directory');
+      await fs.access(directory, constants.R_OK);
+    } catch { throw new Error(`项目目录不存在或无法访问：${directory}`); }
+    return { cwd: directory };
+  }
   async function run(method, params) {
     if (method === 'init') return { supported: supported(), folders: folders(),
       state: cleanState(await provider.globalState.get(STATE_KEY)), version: provider.extensionVersion };
@@ -91,6 +105,15 @@ exports.createLayerHost = function createLayerHost({ vscode, provider, webview, 
       if (!['/', '/extension/panel/new'].includes(params.path)) throw new Error('空白聊天入口无效。');
       provider.postMessageToWebview(webview, { type: 'navigate-to-route', path: params.path });
       return { path: params.path };
+    }
+    if (method === 'validate-project') return validateProject(params.cwd);
+    if (method === 'new-project-chat') {
+      if (!['/', '/extension/panel/new'].includes(params.path)) throw new Error('空白聊天入口无效。');
+      const { cwd } = await validateProject(params.cwd);
+      // Only navigate to a project-scoped native draft. Creation remains part of the first submission.
+      const route = `${params.path}?vclProjectCwd=${encodeURIComponent(cwd)}`;
+      provider.postMessageToWebview(webview, { type: 'navigate-to-route', path: route });
+      return { path: route, cwd };
     }
     if (method === 'save-state') {
       await provider.globalState.update(STATE_KEY, cleanState(params.state));
