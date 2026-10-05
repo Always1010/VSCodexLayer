@@ -1,0 +1,21 @@
+body.vcl-enabled { --vcl-rail-width: 250px; }
+body.vcl-enabled > #root {
+  position: absolute !important;
+  inset: 0 0 0 var(--vcl-rail-width) !important;
+  width: auto !important;
+  min-width: 0;
+  height: 100%;
+}
+#vcl-navigation {
+  position: fixed;
+  inset: 0 auto 0 0;
+  box-sizing: border-box;
+  width: var(--vcl-rail-width);
+  overflow: auto;
+  padding: 12px;
+  border-right: 1px solid var(--vscode-panel-border, #ddd);
+  background: var(--vscode-sideBar-background, #f7f7f7);
+  color: var(--vscode-sideBar-foreground, #222);
+  font: var(--vscode-font-size, 13px) var(--vscode-font-family, sans-serif);
+}
+#vcl-navigation button { display: block; width: 100%; padding: 8px; text-align: left; cursor: pointer; }
