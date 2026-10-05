@@ -47,6 +47,8 @@ node tools/layer.mjs restore --confirm
 
 `node --test tests/bootstrap.test.mjs` 检查官方 API 的一次获取和草稿状态透传。`node tools/check-adapter.mjs` 只读本机官方插件，在临时副本检查接入补丁的语法、应用与恢复。
 
+接入检查也支持 `--extension "插件绝对路径"`，目标已经应用补丁时从经过校验的备份读取原件，不复制已修改文件作为原件。
+
 `node --test tests/navigation.test.mjs` 检查路径分组、当前项目筛选、搜索和完整分页。相关检查按改动范围运行，不自动启动桌面窗口。
 
 `node tools/check-ui.mjs` 使用本机已有 Chrome 或 Edge 的无头模式，通过模拟官方消息桥接验证导航交互、跨页读取、官方根节点与草稿保留、返回原版以及宽窄布局。不安装浏览器、不弹出窗口，使用临时独立浏览器配置并在退出时清理。模拟界面截图写入被 Git 忽略的 `.scratch/ui`，不能代替真实官方聊天验收。

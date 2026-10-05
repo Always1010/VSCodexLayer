@@ -5,10 +5,12 @@ import { Script } from 'node:vm';
 import { execFileSync } from 'node:child_process';
 import { findExtension } from './layer.mjs';
 import { buildPatchPlan } from '../adapters/codex-26.5930.51102.mjs';
-import { applyPatch, restorePatch, sha256 } from '../lib/patch-engine.mjs';
+import { applyPatch, restorePatch, sha256, readOriginal } from '../lib/patch-engine.mjs';
 
 // Only read the real installation. Exercise mutations in a newly created fixture.
-const directory = await findExtension();
+const args = process.argv.slice(2);
+if (args.length && (args[0] !== '--extension' || args.length !== 2)) throw new Error('用法：node tools/check-adapter.mjs [--extension 路径]');
+const directory = args[1] ?? await findExtension();
 const plan = await buildPatchPlan(directory);
 new Script(plan.files.find((entry) => entry.path === 'out/extension.js').content);
 const temporaryParent = await fs.realpath(os.tmpdir());
@@ -19,7 +21,7 @@ try {
   for (const entry of plan.files.filter((file) => file.originalHash !== null)) {
     const target = path.join(fixture, entry.path);
     await fs.mkdir(path.dirname(target), { recursive: true });
-    await fs.copyFile(path.join(directory, entry.path), target);
+    await fs.writeFile(target, await readOriginal(directory, entry.path, entry.originalHash));
   }
   const result = await applyPatch(fixture, plan);
   if (result.status !== 'patched') throw new Error('补丁未完整应用。');
