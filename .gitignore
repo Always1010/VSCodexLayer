@@ -1,0 +1,8 @@
+node_modules/
+.scratch/
+coverage/
+*.log
+test-results/
+playwright-report/
+.vscodex-layer/
+*.vsix
