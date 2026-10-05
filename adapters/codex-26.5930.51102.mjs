@@ -3,7 +3,7 @@ import { fileURLToPath } from 'node:url';
 import { extensionRoot, readOriginal } from '../lib/patch-engine.mjs';
 
 export const VERSION = '26.5930.51102';
-export const ADAPTER = `codex-${VERSION}-v2`;
+export const ADAPTER = `codex-${VERSION}-v3`;
 export const DRAFT_SOURCE = ['webview/assets/app-initial-50ebc5be4f47.js',
   '9b78830beea2d5af1e0a0f3073c7d8854e802ed0044673f5bfdde9230a44b254'];
 const ORIGINALS = [
@@ -50,6 +50,9 @@ export async function buildPatchPlan(directory) {
   const title = '(0,$.jsx)(g,{id:`header.recentChats`,defaultMessage:`Chats`,description:`Header label for recent tasks`})';
   originals[3].content = replaceOnce(originals[3].content, title,
     '(0,$.jsx)(`span`,{"data-vcl-home-history":true,children:' + title + '})');
+  originals[3].content = replaceOnce(originals[3].content,
+    'onClick:n,"aria-label":a,children:o',
+    'onClick:n,"aria-label":a,"data-vcl-chat-back":true,children:o');
   const assets = [
     ['runtime/host.cjs', 'out/vscodex-layer-host.cjs'],
     ['webview/bootstrap.js', 'webview/vscodex-layer/bootstrap.js'],

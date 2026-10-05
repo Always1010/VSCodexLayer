@@ -44,7 +44,7 @@ setTimeout(()=>window.postMessage({type:'vscodex-layer/response',id:message.id,r
 </script>
 <link rel="stylesheet" href="/webview/layer.css"><script src="/webview/bootstrap.js"></script>
 <script type="module" src="/webview/layer.mjs"></script>
-</head><body><main id="root"><header id="native-title"></header><div data-vcl-home-history>聊天 · 最近聊天 · 查看全部</div><article><h1>右侧保留官方聊天界面</h1><p>这里使用模拟聊天区域检查导航布局。实际增强复用官方消息、输入框、模型选择、工具执行和审批。</p><p>选择左侧聊天，在同一个页面切换。项目可以折叠，支持全部项目和当前项目筛选。</p></article><textarea id="native-composer" aria-label="聊天输入框">未发送的草稿</textarea><div class="note">界面验证示意 · 模拟数据</div></main>
+</head><body><main id="root"><header><button data-vcl-chat-back aria-label="返回">←</button><span id="native-title"></span></header><div data-vcl-home-history>聊天 · 最近聊天 · 查看全部</div><article><h1>右侧保留官方聊天界面</h1><p>这里使用模拟聊天区域检查导航布局。实际增强复用官方消息、输入框、模型选择、工具执行和审批。</p><p>选择左侧聊天，在同一个页面切换。项目可以折叠，支持全部项目和当前项目筛选。</p></article><textarea id="native-composer" aria-label="聊天输入框">未发送的草稿</textarea><div class="note">界面验证示意 · 模拟数据</div></main>
 <script type="module">window.nativeRoot=document.getElementById('root');window.nativeApi=acquireVsCodeApi();mockNavigate('/');nativeApi.postMessage({type:'ready'});</script>
 </body></html>`;
 const allowed = new Set(['bootstrap.js', 'client.mjs', 'core.mjs', 'layer.mjs', 'layer.css']);
@@ -130,6 +130,7 @@ try {
   await waitFor(`!document.getElementById('vcl-navigation').classList.contains('vcl-collapsed')`);
   await evaluate(`document.getElementById('native-composer').value='中文草稿\\n第二行 @文件 /命令';document.getElementById('native-composer').dispatchEvent(new Event('input'));document.querySelector('[data-vcl-key="thread:thread-8"]').click()`);
   await waitFor(`mockRoute==='/local/thread-8'`);
+  await assertBrowser(`getComputedStyle(document.querySelector('[data-vcl-chat-back]')).display==='none'`, '聊天顶部返回键仍显示');
   await assertBrowser(`document.getElementById('native-composer').value==='历史聊天自己的草稿'`, '新聊天草稿串入历史聊天');
   await evaluate(`mockNewChat()`);
   await waitFor(`mockRoute==='/'`);
@@ -170,7 +171,7 @@ try {
   await screenshot('navigation-dark.png');
   await evaluate(`document.querySelector('[aria-label="返回原版界面"]').click()`);
   await waitFor(`!document.body.classList.contains('vcl-enabled') && document.getElementById('vcl-launcher')`);
-  await assertBrowser(`mockState.disabled && document.getElementById('root')===nativeRoot`, '返回原版时状态错误');
+  await assertBrowser(`mockState.disabled && document.getElementById('root')===nativeRoot && getComputedStyle(document.querySelector('[data-vcl-chat-back]')).display!=='none'`, '返回原版时状态或返回键错误');
   await evaluate(`mockNewChat()`);
   await assertBrowser(`document.getElementById('native-composer').value==='未发送的草稿' && getComputedStyle(document.querySelector('[data-vcl-home-history]')).display!=='none'`, '返回原版未恢复首页列表或草稿');
   await evaluate(`window.mockKeyEvents=0;window.addEventListener('keydown',()=>{mockKeyEvents++})`);
