@@ -17,7 +17,8 @@ export async function main(args = process.argv.slice(2)) {
   const command = args[0] ?? 'status';
   if (command === 'help' || command === '--help') {
     console.log('node tools/layer.mjs <status|plan|apply|restore> [--extension 路径] [--confirm]\n'
-      + 'status / plan 只读；apply / restore 修改官方插件文件，必须显式加 --confirm。');
+      + 'status / plan 只读；apply 安装或更新补丁，自动校验并恢复旧补丁；restore 卸载补丁。\n'
+      + 'apply / restore 修改官方插件文件，必须显式加 --confirm。');
     return;
   }
   if (!['status', 'plan', 'apply', 'restore'].includes(command)) throw new Error('未知命令。运行 help 查看用法。');

@@ -23,7 +23,7 @@ node tools/layer.mjs restore --confirm
 
 当前仅支持插件版本 `26.5930.51102` 的已核查 Windows 包，校验四个待修改官方文件以及保持原样的官方草稿实现模块的 SHA-256。相同版本但文件内容不同也会拒绝应用。未知版本不会自动修改。
 
-旧版本补丁升级到当前版本时，需要在关闭所有 VS Code 窗口后先运行 `restore --confirm`，再运行 `apply --confirm`；脚本拒绝直接覆盖已有补丁及备份。恢复文件补丁不会删除官方草稿。
+首次安装或刷新到当前仓库代码，都只需在关闭所有 VS Code 窗口后运行 `node tools/layer.mjs apply --confirm`。已有补丁与当前代码不同时，脚本先校验全部旧文件、原件备份和新补丁，再在同一操作锁内自动恢复并应用当前补丁；相同补丁重复执行不会修改文件。`restore --confirm` 用于单独卸载补丁，更新时无需手动执行。恢复文件补丁不会删除官方草稿。
 
 官方更新、其他工具改写文件或备份损坏时，脚本拒绝覆盖。检查 `status` 输出后处理对应版本；不要用旧备份覆盖新插件。若补丁写入中断，保留完整备份并运行恢复命令。进程意外退出可能留下 `.vscodex-layer.lock`，确认没有补丁进程后才能手动移除该锁文件。
 
@@ -49,7 +49,7 @@ node tools/layer.mjs restore --confirm
 
 ## 验证
 
-`node --test tests/patch-engine.test.mjs` 检查补丁应用、重复执行、部分恢复、冲突及损坏备份保护。
+`node --test tests/patch-engine.test.mjs` 检查补丁应用、单命令更新、重复执行、部分恢复、冲突及损坏备份保护。
 
 `node --test tests/host.test.mjs` 使用替身连接检查摘要读取、同面板导航和远程模式拒绝。真实 VS Code 验收需要另行启动窗口，仓库脚本不自动进行。
 
