@@ -1,0 +1,14 @@
+# VSCodexLayer
+
+为官方 Codex VS Code 插件增加项目聊天导航，保留官方聊天界面和后端连接。
+
+需要已有 Node.js 22 或更新版本，无需安装 npm 依赖。第一版适配 Windows 本地工作区和 Codex 插件 `26.5930.51102`。
+
+```powershell
+node tools/layer.mjs status
+node tools/layer.mjs plan
+```
+
+这两个命令只读。应用及恢复方法、支持范围和接入说明见 [使用与维护](docs/USAGE.md)。
+
+主要功能：项目聊天导航、同面板切换官方聊天、校验官方原件并保存恢复备份。
