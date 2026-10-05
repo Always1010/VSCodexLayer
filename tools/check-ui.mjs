@@ -110,6 +110,12 @@ try {
     const { data } = await send('Page.captureScreenshot', { format: 'png' }, sessionId);
     await fs.writeFile(path.join(output, name), Buffer.from(data, 'base64'));
   };
+  const toggleShortcut = async () => {
+    await send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Alt', code: 'AltLeft', modifiers: 1 }, sessionId);
+    await send('Input.dispatchKeyEvent', { type: 'keyDown', key: '/', code: 'Slash', windowsVirtualKeyCode: 191, modifiers: 1 }, sessionId);
+    await send('Input.dispatchKeyEvent', { type: 'keyUp', key: '/', code: 'Slash', modifiers: 1 }, sessionId);
+    await send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Alt', code: 'AltLeft' }, sessionId);
+  };
   await send('Emulation.setDeviceMetricsOverride', { width: 1100, height: 800, deviceScaleFactor: 1, mobile: false }, sessionId);
   await send('Page.navigate', { url: address }, sessionId);
   await waitFor(`document.querySelector('.vcl-count')?.textContent.includes('63 个聊天')`);
@@ -118,6 +124,10 @@ try {
   await assertBrowser(`document.querySelectorAll('#vcl-navigation img').length===0`, '聊天标题被当成 HTML 执行');
   await assertBrowser(`document.getElementById('root')===nativeRoot && document.getElementById('native-composer').value==='未发送的草稿' && nativeApi.getState().draft==='未发送的草稿'`, '官方根节点或草稿被改写');
   await assertBrowser(`!document.querySelector('[aria-current="page"]') && getComputedStyle(document.querySelector('[data-vcl-home-history]')).display==='none'`, '空白页仍显示重复历史列表或选中聊天');
+  await send('Emulation.setDeviceMetricsOverride', { width: 480, height: 800, deviceScaleFactor: 1, mobile: false }, sessionId);
+  await waitFor(`document.getElementById('vcl-navigation').classList.contains('vcl-collapsed')`);
+  await send('Emulation.setDeviceMetricsOverride', { width: 1100, height: 800, deviceScaleFactor: 1, mobile: false }, sessionId);
+  await waitFor(`!document.getElementById('vcl-navigation').classList.contains('vcl-collapsed')`);
   await evaluate(`document.getElementById('native-composer').value='中文草稿\\n第二行 @文件 /命令';document.getElementById('native-composer').dispatchEvent(new Event('input'));document.querySelector('[data-vcl-key="thread:thread-8"]').click()`);
   await waitFor(`mockRoute==='/local/thread-8'`);
   await assertBrowser(`document.getElementById('native-composer').value==='历史聊天自己的草稿'`, '新聊天草稿串入历史聊天');
@@ -128,6 +138,19 @@ try {
   await waitFor(`!document.querySelector('[aria-label="刷新聊天列表"]').disabled`);
   await assertBrowser(`document.getElementById('native-composer').value==='中文草稿\\n第二行 @文件 /命令'`, '失败或刷新丢失草稿');
   await evaluate(`document.getElementById('native-composer').value='未发送的草稿';document.getElementById('native-composer').dispatchEvent(new Event('input'))`);
+  await evaluate(`document.getElementById('native-composer').focus()`);
+  await toggleShortcut();
+  await waitFor(`mockState.collapsed===true`);
+  await assertBrowser(`document.getElementById('vcl-navigation').classList.contains('vcl-collapsed') && document.activeElement.id==='native-composer' && document.getElementById('native-composer').value==='未发送的草稿'`, '快捷键没有折叠导航或改变输入框草稿／焦点');
+  await assertBrowser(`window.dispatchEvent(new KeyboardEvent('keydown',{key:'/',code:'Slash',altKey:true,repeat:true,cancelable:true}))===false && document.getElementById('vcl-navigation').classList.contains('vcl-collapsed')`, '长按快捷键反复切换');
+  await toggleShortcut();
+  await waitFor(`mockState.collapsed===false`);
+  await assertBrowser(`!document.getElementById('vcl-navigation').classList.contains('vcl-collapsed') && document.getElementById('native-composer').value==='未发送的草稿'`, '快捷键没有展开导航或写入斜杠');
+  await assertBrowser(`window.dispatchEvent(new KeyboardEvent('keydown',{key:'/',code:'Slash',altKey:true,ctrlKey:true,cancelable:true})) && window.dispatchEvent(new KeyboardEvent('keydown',{key:'/',code:'Slash',altKey:true,isComposing:true,cancelable:true})) && !document.getElementById('vcl-navigation').classList.contains('vcl-collapsed')`, '快捷键拦截其他组合键或中文输入法');
+  await evaluate(`document.querySelector('.vcl-input').focus()`);
+  await toggleShortcut();
+  await assertBrowser(`document.activeElement.id==='vcl-toggle'`, '折叠后焦点留在隐藏的导航控件');
+  await toggleShortcut();
   await screenshot('navigation-light.png');
   await evaluate(`document.querySelector('[data-vcl-key="thread:thread-8"]').click()`);
   await waitFor(`document.querySelector('[data-vcl-key="thread:thread-8"]')?.getAttribute('aria-current')==='page'`);
@@ -150,6 +173,9 @@ try {
   await assertBrowser(`mockState.disabled && document.getElementById('root')===nativeRoot`, '返回原版时状态错误');
   await evaluate(`mockNewChat()`);
   await assertBrowser(`document.getElementById('native-composer').value==='未发送的草稿' && getComputedStyle(document.querySelector('[data-vcl-home-history]')).display!=='none'`, '返回原版未恢复首页列表或草稿');
+  await evaluate(`window.mockKeyEvents=0;window.addEventListener('keydown',()=>{mockKeyEvents++})`);
+  await toggleShortcut();
+  await assertBrowser(`mockKeyEvents===2 && !document.body.classList.contains('vcl-enabled')`, '导航关闭后仍拦截快捷键');
   await evaluate(`document.getElementById('vcl-launcher').click()`);
   await waitFor(`document.body.classList.contains('vcl-enabled') && document.querySelector('.vcl-count')?.textContent.includes('8 个聊天')`);
   await assertBrowser(`!mockState.disabled`, '重新启用失败');
@@ -159,9 +185,11 @@ try {
   await waitFor(`mockRoute==='/'`);
   await assertBrowser(`document.getElementById('native-composer').value==='' && mockSubmissions===1 && mockThreads.length===64`, '发送后草稿复活或聊天重复创建');
   await send('Emulation.setDeviceMetricsOverride', { width: 480, height: 800, deviceScaleFactor: 1, mobile: false }, sessionId);
+  await waitFor(`!document.getElementById('vcl-navigation').classList.contains('vcl-collapsed')`);
+  await toggleShortcut();
   await waitFor(`document.getElementById('vcl-navigation')?.classList.contains('vcl-collapsed')`);
   await screenshot('navigation-narrow.png');
-  console.log('无头界面检查通过：空白首页、切换后草稿恢复与隔离、发送失败保留、发送后清理与新聊天高亮，以及分页、筛选、搜索、布局和原版恢复。');
+  console.log('无头界面检查通过：Alt+/ 切换、输入框草稿与焦点保持、长按／输入法保护、状态保存和关闭后解绑，以及空白首页、草稿切换、发送与导航布局。');
   console.log(`模拟界面截图：${output}`);
 } finally {
   if (socket?.readyState === WebSocket.OPEN) {
