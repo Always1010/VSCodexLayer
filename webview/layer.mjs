@@ -115,7 +115,9 @@ class Navigation {
   }
   onRoute(route) {
     if (route === '/' || route === '/extension/panel/new') this.draftPath = route;
-    const next = routeThreadId(route); if (this.active === next) return;
+    const next = routeThreadId(route);
+    document.body.classList.toggle('vcl-local-chat', next !== null);
+    if (this.active === next) return;
     this.active = next; const thread = this.threads.find((item) => item.id === next);
     if (thread) this.closed.delete(normalizePath(thread.cwd));
     this.render(); if (next && !thread) this.scheduleRefresh();
@@ -240,7 +242,7 @@ class Navigation {
     if (this.disposed) return;
     this.disposed = true; this.abort.abort(); clearTimeout(this.refreshTimer); clearTimeout(this.saveTimer);
     for (const cleanup of this.cleanups) cleanup();
-    this.rail?.remove(); document.body.classList.remove('vcl-enabled'); document.body.style.removeProperty('--vcl-rail-width');
+    this.rail?.remove(); document.body.classList.remove('vcl-enabled', 'vcl-local-chat'); document.body.style.removeProperty('--vcl-rail-width');
     this.client.dispose();
   }
 }
