@@ -1,0 +1,12 @@
+{
+  "name": "vscodex-layer",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "为官方 Codex VS Code 界面增加项目聊天导航",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "test:patch": "node --test tests/patch-engine.test.mjs",
+    "layer": "node tools/layer.mjs"
+  }
+}
