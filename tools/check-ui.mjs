@@ -28,18 +28,21 @@ const page = `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8">
 *{box-sizing:border-box}html,body,#root{margin:0;height:100%;width:100%}body{font-family:"Segoe UI","Microsoft YaHei",sans-serif;background:#fff;color:#282828}#root{display:flex;flex-direction:column;padding:24px;background:inherit}header{font-size:14px}article{flex:1;padding:40px 5%;line-height:1.8}article h1{font-size:22px}article p{max-width:600px;color:#777}textarea{width:100%;height:100px;padding:18px;border:1px solid #ddd;border-radius:20px;font:inherit;resize:none;background:inherit;color:inherit}.note{font-size:11px;color:#888;margin-top:8px}
 </style>
 <script>
-window.mockThreads=${JSON.stringify(threads)};window.mockState={mode:'all',width:250,groups:[],collapsed:null,disabled:false};window.mockRequests=[];window.mockRoute='/';window.mockDrafts={'/':'未发送的草稿','/local/thread-8':'历史聊天自己的草稿'};window.mockSubmissions=0;let acquired=false;
-window.mockNavigate=path=>{mockRoute=path;__vscodexLayerBridge.observeRoute(path);document.querySelector('#native-title').textContent=path==='/'?'':mockThreads.find(t=>'/local/'+t.id===path)?.title??'新聊天';const previous=document.querySelector('#native-composer');const next=previous.cloneNode();next.value=mockDrafts[path]??'';next.oninput=()=>{mockDrafts[mockRoute]=next.value};previous.replaceWith(next);document.querySelector('[data-vcl-home-history]').hidden=path!=='/'};
+window.mockThreads=${JSON.stringify(threads)};window.mockState={mode:'all',width:250,groups:[],collapsed:null,disabled:false};window.mockRequests=[];window.mockRoute='/';window.mockDrafts={'/':'未发送的草稿','/local/thread-8':'历史聊天自己的草稿'};window.mockSubmissions=0;window.mockUnavailable=new Set();let acquired=false;
+window.mockDraftKey=path=>{const url=new URL(path,location.origin);return __vscodexLayerBridge.projectRoute(url.pathname,url.pathname,url.search)?.vclDraftKey??path};
+window.mockNavigate=path=>{mockRoute=path;__vscodexLayerBridge.observeRoute(path);document.querySelector('#native-title').textContent=path==='/'?'':mockThreads.find(t=>'/local/'+t.id===path)?.title??'新聊天';const previous=document.querySelector('#native-composer');const next=previous.cloneNode();next.value=mockDrafts[mockDraftKey(path)]??'';next.oninput=()=>{mockDrafts[mockDraftKey(mockRoute)]=next.value};previous.replaceWith(next);document.querySelector('[data-vcl-home-history]').hidden=path!=='/'};
 window.mockNewChat=()=>{if(!__vscodexLayerBridge.resumeDraft({selectChat:true}))mockNavigate('/')};
-window.mockSubmit=success=>{if(!success)return;mockSubmissions++;mockDrafts['/']='';const thread={id:'sent-thread',title:'新发送的聊天',cwd:'D:/WRK/VSCodexLayer',updatedAt:2000};mockThreads.unshift(thread);mockNavigate('/local/'+thread.id);window.postMessage({type:'vscodex-layer/event',event:'threads-changed'},location.origin)};
+window.mockSubmit=async success=>{if(!success)return;const url=new URL(mockRoute,location.origin);const project=__vscodexLayerBridge.projectRoute(url.pathname,url.pathname,url.search);if(project)await __vscodexLayerBridge.validateProject(project.vclProjectCwd);mockSubmissions++;mockDrafts[mockDraftKey(mockRoute)]='';const thread={id:mockSubmissions===1?'sent-thread':'sent-thread-'+mockSubmissions,title:'新发送的聊天',cwd:project?.vclProjectCwd??'D:/WRK/VSCodexLayer',updatedAt:2000};mockThreads.unshift(thread);mockNavigate('/local/'+thread.id);window.postMessage({type:'vscodex-layer/event',event:'threads-changed'},location.origin)};
 window.acquireVsCodeApi=()=>{if(acquired)throw Error('API acquired twice');acquired=true;let state={draft:'未发送的草稿'};return{getState:()=>state,setState:value=>(state=value),postMessage(message){
-if(message.type!=='vscodex-layer/request')return;mockRequests.push(message);let result;
+if(message.type!=='vscodex-layer/request')return;mockRequests.push(message);let result,error;
 if(message.method==='init')result={supported:true,folders:[{name:'VSCodexLayer',path:'D:/WRK/VSCodexLayer'}],state:mockState,version:'mock'};
 else if(message.method==='list'){const first=message.params.cursor==null;result={data:mockThreads.slice(first?0:50,first?50:undefined),nextCursor:first?'page-2':null}}
 else if(message.method==='save-state'){mockState=structuredClone(message.params.state);result={saved:true}}
 else if(message.method==='navigate'){mockNavigate('/local/'+message.params.threadId);result={threadId:message.params.threadId}}
+else if(message.method==='validate-project'){if(mockUnavailable.has(message.params.cwd))error='项目目录不存在或无法访问';else result={cwd:message.params.cwd}}
+else if(message.method==='new-project-chat'){if(mockUnavailable.has(message.params.cwd))error='项目目录不存在或无法访问';else{const path=message.params.path+'?vclProjectCwd='+encodeURIComponent(message.params.cwd);mockNavigate(path);result={path,cwd:message.params.cwd}}}
 else if(message.method==='new-chat'){mockNavigate(message.params.path);result={path:message.params.path}}
-setTimeout(()=>window.postMessage({type:'vscodex-layer/response',id:message.id,result},location.origin),0)
+setTimeout(()=>window.postMessage({type:'vscodex-layer/response',id:message.id,result,error},location.origin),0)
 }}};
 </script>
 <link rel="stylesheet" href="/webview/layer.css"><script src="/webview/bootstrap.js"></script>
@@ -185,12 +188,46 @@ try {
   await evaluate(`mockNewChat()`);
   await waitFor(`mockRoute==='/'`);
   await assertBrowser(`document.getElementById('native-composer').value==='' && mockSubmissions===1 && mockThreads.length===64`, '发送后草稿复活或聊天重复创建');
+  await evaluate(`document.getElementById('vcl-mode').value='all';document.getElementById('vcl-mode').dispatchEvent(new Event('change'))`);
+  await assertBrowser(`document.querySelectorAll('.vcl-new-chat').length===3 && document.querySelectorAll('.vcl-project-heading .vcl-new-chat').length===0`, '项目新建按钮缺失或嵌入折叠按钮');
+  await evaluate(`document.querySelector('[data-vcl-key="project:d:/other/project"]').click();document.querySelector('[data-vcl-key="new:d:/other/project"]').click()`);
+  await waitFor(`new URL(mockRoute,location.origin).searchParams.get('vclProjectCwd')==='D:/Other/Project' && !document.querySelector('.vcl-new-chat').disabled`);
+  await assertBrowser(`getComputedStyle(document.querySelector('[data-vcl-chat-back]')).display==='none'`, '项目新聊天页顶部返回键仍显示');
+  await assertBrowser(`document.querySelector('[data-vcl-key="project:d:/other/project"]').getAttribute('aria-expanded')==='false' && document.querySelector('.vcl-project-context').title==='D:/Other/Project' && mockThreads.length===64 && mockSubmissions===1`, '新建操作折叠项目、绑定错误目录或提前创建聊天');
+  await evaluate(`document.getElementById('native-composer').value='其他项目的草稿';document.getElementById('native-composer').dispatchEvent(new Event('input'));document.querySelector('[data-vcl-key="new:d:/wrk/vscodexlayer"]').click()`);
+  await waitFor(`new URL(mockRoute,location.origin).searchParams.get('vclProjectCwd')==='D:/WRK/VSCodexLayer'`);
+  await assertBrowser(`document.getElementById('native-composer').value===''`, '其他项目草稿串入当前项目');
+  await evaluate(`document.getElementById('native-composer').value='当前项目的草稿';document.getElementById('native-composer').dispatchEvent(new Event('input'));document.querySelector('[data-vcl-key="new:d:/other/project"]').click()`);
+  await waitFor(`new URL(mockRoute,location.origin).searchParams.get('vclProjectCwd')==='D:/Other/Project'`);
+  await assertBrowser(`document.getElementById('native-composer').value==='其他项目的草稿'`, '跨项目切回后草稿丢失');
+  await evaluate(`document.querySelector('[data-vcl-key="thread:thread-8"]').click()`);
+  await waitFor(`mockRoute==='/local/thread-8'`);
+  await evaluate(`mockNewChat()`);
+  await waitFor(`new URL(mockRoute,location.origin).searchParams.get('vclProjectCwd')==='D:/Other/Project'`);
+  await assertBrowser(`document.getElementById('native-composer').value==='其他项目的草稿'`, '普通新聊天没有返回上次的项目草稿');
+  await evaluate(`mockUnavailable.add('D:/WRK/Project');document.querySelector('[data-vcl-key="new:d:/wrk/project"]').click()`);
+  await waitFor(`document.querySelector('.vcl-status').classList.contains('vcl-error') && !document.querySelector('.vcl-new-chat').disabled`);
+  await assertBrowser(`new URL(mockRoute,location.origin).searchParams.get('vclProjectCwd')==='D:/Other/Project' && document.getElementById('native-composer').value==='其他项目的草稿'`, '失效项目新建后回退或覆盖草稿');
+  await evaluate(`mockUnavailable.add('D:/Other/Project')`);
+  await assertBrowser(`(async()=>{try{await mockSubmit(true);return false}catch(error){return mockSubmissions===1&&mockThreads.length===64&&document.getElementById('native-composer').value==='其他项目的草稿'}})()`, '首次发送未拒绝失效目录或丢失草稿');
+  await evaluate(`mockUnavailable.clear();mockSubmit(true)`);
+  await waitFor(`document.querySelector('[data-vcl-key="thread:sent-thread-2"]')?.getAttribute('aria-current')==='page'`);
+  await assertBrowser(`mockThreads[0].cwd==='D:/Other/Project' && document.querySelector('[data-vcl-key="thread:sent-thread-2"]').closest('.vcl-project').querySelector('[data-vcl-key="project:d:/other/project"]')`, '新聊天创建到了当前窗口目录或错误项目分组');
+  await evaluate(`mockNewChat()`);
+  await waitFor(`new URL(mockRoute,location.origin).searchParams.get('vclProjectCwd')==='D:/Other/Project'`);
+  await assertBrowser(`document.getElementById('native-composer').value===''`, '发送后项目草稿没有清理');
+  await evaluate(`document.querySelector('[data-vcl-key="new:d:/wrk/vscodexlayer"]').click()`);
+  await waitFor(`new URL(mockRoute,location.origin).searchParams.get('vclProjectCwd')==='D:/WRK/VSCodexLayer'`);
+  await assertBrowser(`document.getElementById('native-composer').value==='当前项目的草稿'`, '发送其他项目后当前项目草稿被清理');
+  await evaluate(`mockThreads.push({id:'unclassified',title:'未分类聊天',cwd:null});document.querySelector('[aria-label="刷新聊天列表"]').click()`);
+  await waitFor(`document.querySelector('[data-vcl-key="new:"]')?.disabled`);
+  await screenshot('navigation-project-new-chat.png');
   await send('Emulation.setDeviceMetricsOverride', { width: 480, height: 800, deviceScaleFactor: 1, mobile: false }, sessionId);
   await waitFor(`!document.getElementById('vcl-navigation').classList.contains('vcl-collapsed')`);
   await toggleShortcut();
   await waitFor(`document.getElementById('vcl-navigation')?.classList.contains('vcl-collapsed')`);
   await screenshot('navigation-narrow.png');
-  console.log('无头界面检查通过：Alt+/ 切换、输入框草稿与焦点保持、长按／输入法保护、状态保存和关闭后解绑，以及空白首页、草稿切换、发送与导航布局。');
+  console.log('无头界面检查通过：项目新建按钮、完整目录绑定、草稿隔离、失效目录与发送清理、顶部返回键隐藏，以及快捷键、搜索筛选和导航布局。');
   console.log(`模拟界面截图：${output}`);
 } finally {
   if (socket?.readyState === WebSocket.OPEN) {

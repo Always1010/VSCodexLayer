@@ -1,5 +1,5 @@
 import { LayerClient } from './client.mjs';
-import { groupThreads, normalizePath, routeThreadId, loadAllThreads } from './core.mjs';
+import { groupThreads, normalizePath, projectName, routeThreadId, loadAllThreads } from './core.mjs';
 
 const SVG = 'http://www.w3.org/2000/svg';
 const icons = {
@@ -8,6 +8,7 @@ const icons = {
   folder: ['M3 7V5a2 2 0 0 1 2-2h5l2 3h7a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z'],
   chevron: ['m9 6 6 6-6 6'], search: ['m21 21-4.4-4.4', 'M19 11a8 8 0 1 1-16 0 8 8 0 0 1 16 0Z'],
   back: ['m12 5-7 7 7 7', 'M5 12h15'],
+  plus: ['M12 5v14', 'M5 12h14'],
 };
 
 function element(tag, className, text) {
@@ -35,6 +36,7 @@ class Navigation {
     this.client = client; this.bridge = bridge; this.info = info; this.state = info.state;
     this.threads = []; this.closed = new Set(this.state.groups); this.query = ''; this.active = null;
     this.draftPath = '/';
+    this.projectCwd = null; this.draftProjectCwd = null;
     this.abort = new AbortController(); this.cleanups = []; this.disposed = false;
   }
   mount() {
@@ -57,7 +59,8 @@ class Navigation {
     this.search = element('input', 'vcl-input'); this.search.type = 'search'; this.search.placeholder = '搜索项目或聊天';
     this.search.setAttribute('aria-label', '搜索项目或聊天');
     this.search.addEventListener('input', () => { this.query = this.search.value; this.render(); });
-    search.append(icon('search'), this.search); controls.append(selectLabel, this.mode, search);
+    this.projectContext = element('div', 'vcl-project-context'); this.projectContext.setAttribute('role', 'status');
+    search.append(icon('search'), this.search); controls.append(selectLabel, this.mode, search, this.projectContext);
     this.status = element('div', 'vcl-status', '正在读取聊天…');
     this.status.setAttribute('role', 'status'); this.status.setAttribute('aria-live', 'polite');
     this.list = element('div', 'vcl-list'); this.list.setAttribute('aria-label', '项目和聊天');
@@ -77,7 +80,8 @@ class Navigation {
     document.body.append(this.rail); document.body.classList.add('vcl-enabled');
     this.cleanups.push(this.bridge.subscribe(({ route }) => this.onRoute(route)));
     this.cleanups.push(this.bridge.setNewChatHandler(() => {
-      this.client.request('new-chat', { path: this.draftPath }).catch((error) => this.showError(error));
+      if (this.draftProjectCwd !== null) this.newProjectChat(this.draftProjectCwd);
+      else this.client.request('new-chat', { path: this.draftPath }).catch((error) => this.showError(error));
     }));
     this.cleanups.push(this.client.onEvent((event) => {
       if (event === 'workspace-changed') {
@@ -114,13 +118,25 @@ class Navigation {
     this.resizeHandle.setAttribute('aria-valuenow', String(Math.round(width)));
   }
   onRoute(route) {
-    if (route === '/' || route === '/extension/panel/new') this.draftPath = route;
+    const url = new URL(route, 'https://vscodex-layer.local');
+    const projectCwd = ['/', '/extension/panel/new'].includes(url.pathname) ? url.searchParams.get('vclProjectCwd') : null;
+    const changedProject = this.projectCwd !== projectCwd;
+    this.projectCwd = projectCwd;
+    if (url.pathname === '/' || url.pathname === '/extension/panel/new') {
+      this.draftPath = url.pathname; this.draftProjectCwd = projectCwd;
+    }
     const next = routeThreadId(route);
-    document.body.classList.toggle('vcl-local-chat', next !== null);
-    if (this.active === next) return;
+    if (this.active === next && !changedProject) return;
     this.active = next; const thread = this.threads.find((item) => item.id === next);
     if (thread) this.closed.delete(normalizePath(thread.cwd));
     this.render(); if (next && !thread) this.scheduleRefresh();
+  }
+  async newProjectChat(cwd) {
+    if (this.creating || this.disposed) return;
+    this.creating = true; this.render();
+    try { await this.client.request('new-project-chat', { path: this.draftPath, cwd }); }
+    catch (error) { this.showError(error); }
+    finally { this.creating = false; if (!this.disposed) this.render(); }
   }
   async refresh() {
     if (this.disposed) return;
@@ -137,9 +153,10 @@ class Navigation {
       });
       if (this.disposed) return;
       const firstLoad = !this.hasLoaded;
+      const knownActive = this.threads.some((thread) => thread.id === this.active);
       this.threads = threads; this.hasLoaded = true;
       const active = threads.find((thread) => thread.id === this.active);
-      if (firstLoad && active) this.closed.delete(normalizePath(active.cwd));
+      if ((firstLoad || !knownActive) && active) this.closed.delete(normalizePath(active.cwd));
       this.status.textContent = ''; this.render();
     } catch (error) { if (!this.disposed) this.showError(error); }
     finally {
@@ -163,11 +180,16 @@ class Navigation {
     const focused = document.activeElement?.closest('[data-vcl-key]')?.dataset.vclKey;
     const groups = groupThreads(this.threads, this.info.folders, { mode: this.state.mode, query: this.query });
     const fragment = document.createDocumentFragment(); let visibleThreads = 0;
+    this.projectContext.textContent = this.projectCwd === null ? '' : `新聊天 · ${projectName(this.projectCwd)}`;
+    this.projectContext.title = this.projectCwd ?? '';
     for (const [index, group] of groups.entries()) {
       visibleThreads += group.threads.length; const section = element('section', 'vcl-project');
       const closed = !this.query && this.closed.has(group.key);
       const heading = element('button', 'vcl-project-heading'); heading.type = 'button';
       heading.dataset.vclKey = `project:${group.key}`; heading.title = group.path || '无法确定工作目录';
+      if (this.projectCwd !== null && group.key === normalizePath(this.projectCwd)) {
+        heading.classList.add('vcl-selected'); heading.setAttribute('aria-current', 'page');
+      }
       heading.setAttribute('aria-expanded', String(!closed)); heading.setAttribute('aria-controls', `vcl-group-${index}`);
       heading.append(icon('chevron', closed ? '' : 'vcl-open'), icon('folder'), element('span', 'vcl-label', group.name));
       if (group.current) heading.append(element('span', 'vcl-current', '当前'));
@@ -192,7 +214,11 @@ class Navigation {
           children.append(row);
         }
       }
-      section.append(heading, children); fragment.append(section);
+      const projectRow = element('div', 'vcl-project-row');
+      const create = iconButton('plus', group.path ? `在 ${group.name} 中新建聊天` : '无法新建聊天：未确定项目目录', () => this.newProjectChat(group.path));
+      create.dataset.vclKey = `new:${group.key}`; create.classList.add('vcl-new-chat');
+      create.disabled = !group.path || this.creating;
+      projectRow.append(heading, create); section.append(projectRow, children); fragment.append(section);
     }
     if (!groups.length) fragment.append(element('div', 'vcl-empty', this.query ? '没有匹配的项目或聊天'
       : this.state.mode === 'current' && !this.info.folders.length ? '当前窗口没有本地项目' : '暂无聊天'));
@@ -206,11 +232,11 @@ class Navigation {
     if (row.classList.contains('vcl-project-heading') && ['ArrowLeft', 'ArrowRight'].includes(event.key)) {
       const expanded = row.getAttribute('aria-expanded') === 'true';
       if ((event.key === 'ArrowLeft' && expanded) || (event.key === 'ArrowRight' && !expanded)) row.click();
-      else if (event.key === 'ArrowRight') row.nextElementSibling?.querySelector('button')?.focus();
+      else if (event.key === 'ArrowRight') row.closest('.vcl-project')?.querySelector('.vcl-threads button')?.focus();
       return;
     }
     if (event.key === 'ArrowLeft') { row.closest('.vcl-project')?.querySelector('.vcl-project-heading')?.focus(); return; }
-    const rows = [...this.list.querySelectorAll('button')]; const index = rows.indexOf(row);
+    const rows = [...this.list.querySelectorAll('button:not(:disabled)')]; const index = rows.indexOf(row);
     const target = event.key === 'Home' ? 0 : event.key === 'End' ? rows.length - 1 : index + (event.key === 'ArrowUp' ? -1 : 1);
     rows[Math.min(rows.length - 1, Math.max(0, target))]?.focus();
   }
@@ -242,12 +268,15 @@ class Navigation {
     if (this.disposed) return;
     this.disposed = true; this.abort.abort(); clearTimeout(this.refreshTimer); clearTimeout(this.saveTimer);
     for (const cleanup of this.cleanups) cleanup();
-    this.rail?.remove(); document.body.classList.remove('vcl-enabled', 'vcl-local-chat'); document.body.style.removeProperty('--vcl-rail-width');
+    this.rail?.remove(); document.body.classList.remove('vcl-enabled'); document.body.style.removeProperty('--vcl-rail-width');
     this.client.dispose();
   }
 }
 
 const bridge = globalThis.__vscodexLayerBridge;
+// Submission validation remains available when only the navigation layout is disabled.
+const projectClient = bridge ? new LayerClient(bridge) : null;
+bridge?.setProjectValidator((cwd) => projectClient.request('validate-project', { cwd }));
 let started = false;
 let navigation;
 function showLauncher(label) {
@@ -272,4 +301,4 @@ async function start(force = false) {
   }
 }
 bridge?.subscribe(({ ready }) => { if (ready && !started && !document.getElementById('vcl-launcher')) start(); });
-window.addEventListener('pagehide', () => navigation?.dispose(), { once: true });
+window.addEventListener('pagehide', () => { navigation?.dispose(); projectClient?.dispose(); }, { once: true });

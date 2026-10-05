@@ -8,7 +8,7 @@ test('官方仅获取一次 API，草稿状态原样透传，路由观察错误�
   let state = { draft: 'unsent message' };
   const messages = [];
   const context = vm.createContext({
-    document: { querySelector() { return { content: '/local/initial' }; } }, queueMicrotask,
+    document: { querySelector() { return { content: '/local/initial' }; } }, queueMicrotask, URLSearchParams,
     acquireVsCodeApi() {
       calls += 1;
       if (calls > 1) throw new Error('already acquired');
@@ -46,5 +46,16 @@ test('官方仅获取一次 API，草稿状态原样透传，路由观察错误�
   assert.equal(state.draft, 'updated');
   remove();
   assert.equal(bridge.resumeDraft(), false);
+  const project = bridge.projectRoute('/', '/', '?vclProjectCwd=D%3A%5COther%5CProject');
+  assert.equal(project.vclProjectCwd, 'D:\\Other\\Project');
+  assert.equal(project.vclDraftKey, bridge.projectRoute('/', '/', '?vclProjectCwd=d%3A%2Fother%2Fproject%2F').vclDraftKey);
+  assert.notEqual(project.vclDraftKey, bridge.projectRoute('/', '/', '?vclProjectCwd=D%3A%5CCurrent%5CProject').vclDraftKey);
+  assert.notEqual(project.vclDraftKey, bridge.projectRoute('/extension/panel/new', '/', '?vclProjectCwd=D%3A%5COther%5CProject').vclDraftKey);
+  assert.equal(bridge.projectRoute('/local/another', '/', '?vclProjectCwd=D%3A%5COther%5CProject'), null);
+  assert.equal(bridge.projectRoute('/', '/', ''), null);
+  assert.equal(bridge.projectCwd({ kind: 'local', vclProjectCwd: 'D:\\Other' }), undefined);
+  await assert.rejects(bridge.validateProject('D:\\Other'), /尚未就绪/);
+  bridge.setProjectValidator(async (cwd) => ({ cwd }));
+  assert.equal((await bridge.validateProject('D:\\Other')).cwd, 'D:\\Other');
   assert.throws(() => vm.runInContext('acquireVsCodeApi()', context), /already acquired/);
 });

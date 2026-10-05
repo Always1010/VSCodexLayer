@@ -1,6 +1,6 @@
 body.vcl-enabled { --vcl-rail-width: 250px; }
 body.vcl-enabled [data-vcl-home-history] { display: none !important; }
-body.vcl-enabled.vcl-local-chat [data-vcl-chat-back] { display: none !important; }
+body.vcl-enabled [data-vcl-chat-back] { display: none !important; }
 body.vcl-enabled > #root {
   position: absolute !important;
   inset: 0 0 0 var(--vcl-rail-width) !important;
@@ -58,6 +58,11 @@ body.vcl-enabled > #root {
 #vcl-navigation .vcl-error { color: var(--vscode-errorForeground, #c42b1c); }
 #vcl-navigation .vcl-list { flex: 1; min-height: 0; overflow: auto; padding: 2px 6px 10px; scrollbar-width: thin; }
 #vcl-navigation .vcl-project { margin-bottom: 6px; }
+#vcl-navigation .vcl-project-row { display: flex; align-items: center; gap: 2px; }
+#vcl-navigation .vcl-project-row > .vcl-project-heading { flex: 1; min-width: 0; width: auto; }
+#vcl-navigation .vcl-new-chat { flex: 0 0 28px; }
+#vcl-navigation .vcl-project-context { font-size: 11px; color: var(--vcl-muted); overflow-wrap: anywhere; }
+#vcl-navigation .vcl-project-context:empty { display: none; }
 #vcl-navigation .vcl-project-heading, #vcl-navigation .vcl-thread {
   width: 100%; display: flex; align-items: center; text-align: left; gap: 6px;
   min-height: 32px; border: 0; border-radius: 6px; background: transparent; padding: 6px;

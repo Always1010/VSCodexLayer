@@ -6,6 +6,7 @@
   let nativeApi;
   let nativeReady = false;
   let newChatHandler;
+  let projectValidator;
   let route = document.querySelector('meta[name="initial-route"]')?.content ?? '/';
   let notifyQueued = false;
   const notify = () => {
@@ -26,6 +27,22 @@
     setNewChatHandler(handler) {
       newChatHandler = handler;
       return () => { if (newChatHandler === handler) newChatHandler = undefined; };
+    },
+    setProjectValidator(handler) { projectValidator = handler; },
+    validateProject(cwd) {
+      if (!projectValidator) return Promise.reject(new Error('项目目录校验尚未就绪，请稍后重试。'));
+      return projectValidator(cwd);
+    },
+    projectCwd(value) { return value?.kind === 'new' ? value.vclProjectCwd : undefined; },
+    projectRoute(pathname, routeTemplate, search = '') {
+      if (pathname !== '/' && pathname !== '/extension/panel/new') return null;
+      const params = new URLSearchParams(search);
+      if (!params.has('vclProjectCwd')) return null;
+      const cwd = params.get('vclProjectCwd');
+      // Keep invalid project markers scoped too: submission must reject them instead of falling back.
+      const key = cwd.replaceAll('\\', '/').replace(/\/$/, '').toLowerCase();
+      return { pathname, routeTemplate, search, routeKind: pathname === '/' ? 'home' : 'new-thread-panel',
+        projectContext: null, vclProjectCwd: cwd, vclDraftKey: `vscodex-layer-new:${pathname}:${encodeURIComponent(key)}` };
     },
     resumeDraft(options) {
       if (!nativeReady || !newChatHandler) return false;
