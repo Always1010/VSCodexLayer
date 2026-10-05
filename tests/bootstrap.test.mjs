@@ -34,5 +34,17 @@ test('官方仅获取一次 API，草稿状态原样透传，路由观察错误�
   bridge.postMessage({ type: 'vscodex-layer/request', id: 'one' });
   assert.equal(messages.length, 2);
   assert.equal(calls, 1);
+  let resumed = 0;
+  assert.equal(bridge.resumeDraft(), false);
+  const remove = bridge.setNewChatHandler(() => { resumed += 1; });
+  assert.equal(bridge.resumeDraft({ selectChat: true }), true);
+  assert.equal(bridge.resumeDraft({ freshDraft: true }), true);
+  assert.equal(bridge.resumeDraft({ prefillPrompt: '用户明确预填' }), false);
+  assert.equal(bridge.resumeDraft({ activeProject: null }), false);
+  assert.equal(bridge.resumeDraft({ prefillComposerDraft: { text: 'rich draft' } }), false);
+  assert.equal(resumed, 2);
+  assert.equal(state.draft, 'updated');
+  remove();
+  assert.equal(bridge.resumeDraft(), false);
   assert.throws(() => vm.runInContext('acquireVsCodeApi()', context), /already acquired/);
 });

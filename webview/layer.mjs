@@ -34,6 +34,7 @@ class Navigation {
   constructor(client, bridge, info) {
     this.client = client; this.bridge = bridge; this.info = info; this.state = info.state;
     this.threads = []; this.closed = new Set(this.state.groups); this.query = ''; this.active = null;
+    this.draftPath = '/';
     this.abort = new AbortController(); this.cleanups = []; this.disposed = false;
   }
   mount() {
@@ -76,6 +77,9 @@ class Navigation {
     this.rail.append(header, controls, this.status, this.list, footer, this.resizeHandle);
     document.body.append(this.rail); document.body.classList.add('vcl-enabled');
     this.cleanups.push(this.bridge.subscribe(({ route }) => this.onRoute(route)));
+    this.cleanups.push(this.bridge.setNewChatHandler(() => {
+      this.client.request('new-chat', { path: this.draftPath }).catch((error) => this.showError(error));
+    }));
     this.cleanups.push(this.client.onEvent((event) => {
       if (event === 'workspace-changed') {
         this.client.request('init').then((next) => {
@@ -99,6 +103,7 @@ class Navigation {
     this.resizeHandle.setAttribute('aria-valuenow', String(Math.round(width)));
   }
   onRoute(route) {
+    if (route === '/' || route === '/extension/panel/new') this.draftPath = route;
     const next = routeThreadId(route); if (this.active === next) return;
     this.active = next; const thread = this.threads.find((item) => item.id === next);
     if (thread) this.closed.delete(normalizePath(thread.cwd));

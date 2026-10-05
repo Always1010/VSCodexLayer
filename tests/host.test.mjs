@@ -42,6 +42,11 @@ test('同面板导航，只读取聊天摘要，不接管官方消息', async (t
   assert.equal(result.data[0].title, 'Title');
   assert.equal('turns' in result.data[0], false);
   assert.equal(f.requests.length, 1);
+  for (const path of ['/', '/extension/panel/new']) {
+    f.send('new-chat', { path }); await flush();
+    assert.deepEqual(f.messages.at(-2), { type: 'navigate-to-route', path });
+  }
+  assert.equal(f.requests.length, 1, '返回空白页不能创建聊天');
 });
 
 test('远程模式和无效路由被拒绝', async (t) => {
@@ -55,4 +60,6 @@ test('远程模式和无效路由被拒绝', async (t) => {
   f.send('navigate', { threadId: '../settings' }); await flush();
   assert.match(f.messages.at(-1).error, /编号无效/);
   assert.equal(f.requests.length, 0);
+  f.send('new-chat', { path: '/settings' }); await flush();
+  assert.match(f.messages.at(-1).error, /空白聊天入口/);
 });
