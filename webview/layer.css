@@ -7,15 +7,83 @@ body.vcl-enabled > #root {
   height: 100%;
 }
 #vcl-navigation {
+  --vcl-fg: var(--vscode-sideBar-foreground, #252525);
+  --vcl-muted: var(--vscode-descriptionForeground, #777);
+  --vcl-border: var(--vscode-sideBar-border, var(--vscode-panel-border, #e4e4e4));
+  --vcl-hover: var(--vscode-list-hoverBackground, #ededed);
+  --vcl-selected: var(--vscode-list-inactiveSelectionBackground, #e6e6e6);
   position: fixed;
   inset: 0 auto 0 0;
+  z-index: 50;
   box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
   width: var(--vcl-rail-width);
-  overflow: auto;
-  padding: 12px;
-  border-right: 1px solid var(--vscode-panel-border, #ddd);
-  background: var(--vscode-sideBar-background, #f7f7f7);
-  color: var(--vscode-sideBar-foreground, #222);
-  font: var(--vscode-font-size, 13px) var(--vscode-font-family, sans-serif);
+  border-right: 1px solid var(--vcl-border);
+  background: var(--vscode-sideBar-background, #f8f8f8);
+  color: var(--vcl-fg);
+  font: var(--vscode-font-size, 13px) var(--vscode-font-family, system-ui, sans-serif);
+  text-align: left;
+  line-height: 1.5;
 }
-#vcl-navigation button { display: block; width: 100%; padding: 8px; text-align: left; cursor: pointer; }
+#vcl-navigation *, #vcl-launcher { box-sizing: border-box; }
+#vcl-navigation button, #vcl-navigation input, #vcl-navigation select, #vcl-launcher { font: inherit; color: inherit; }
+#vcl-navigation button, #vcl-launcher { cursor: pointer; }
+#vcl-navigation button:focus-visible, #vcl-navigation input:focus-visible,
+#vcl-navigation select:focus-visible, #vcl-navigation .vcl-resize:focus-visible, #vcl-launcher:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder, #007acc); outline-offset: -1px;
+}
+#vcl-navigation .vcl-header { display: flex; align-items: center; gap: 4px; padding: 10px 8px 8px 12px; min-height: 46px; }
+#vcl-navigation .vcl-heading { flex: 1; font-size: 13px; font-weight: 600; white-space: nowrap; }
+.vcl-icon { width: 16px; height: 16px; flex: 0 0 16px; }
+#vcl-navigation .vcl-icon-button, #vcl-launcher {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 28px; height: 28px; padding: 5px; border: 0; border-radius: 5px; background: transparent;
+}
+#vcl-navigation .vcl-icon-button:hover, #vcl-launcher:hover { background: var(--vcl-hover, var(--vscode-list-hoverBackground, #ededed)); }
+#vcl-navigation .vcl-icon-button:disabled { opacity: .5; cursor: default; }
+#vcl-navigation .vcl-controls { padding: 0 10px 8px; display: grid; gap: 8px; }
+#vcl-navigation .vcl-select, #vcl-navigation .vcl-search {
+  width: 100%; min-height: 32px; border: 1px solid var(--vcl-border); border-radius: 6px;
+  background: var(--vscode-input-background, #fff);
+}
+#vcl-navigation .vcl-select { padding: 4px 8px; color: var(--vscode-input-foreground, var(--vcl-fg)); }
+#vcl-navigation .vcl-search { display: flex; gap: 6px; align-items: center; padding: 0 8px; color: var(--vcl-muted); }
+#vcl-navigation .vcl-input { min-width: 0; width: 100%; padding: 6px 0; border: 0; background: transparent; color: var(--vscode-input-foreground, var(--vcl-fg)); }
+#vcl-navigation .vcl-input::placeholder { color: var(--vscode-input-placeholderForeground, #888); }
+#vcl-navigation .vcl-status { color: var(--vcl-muted); font-size: 11px; padding: 2px 12px 6px; overflow-wrap: anywhere; }
+#vcl-navigation .vcl-status:empty { display: none; }
+#vcl-navigation .vcl-error { color: var(--vscode-errorForeground, #c42b1c); }
+#vcl-navigation .vcl-list { flex: 1; min-height: 0; overflow: auto; padding: 2px 6px 10px; scrollbar-width: thin; }
+#vcl-navigation .vcl-project { margin-bottom: 6px; }
+#vcl-navigation .vcl-project-heading, #vcl-navigation .vcl-thread {
+  width: 100%; display: flex; align-items: center; text-align: left; gap: 6px;
+  min-height: 32px; border: 0; border-radius: 6px; background: transparent; padding: 6px;
+}
+#vcl-navigation .vcl-project-heading { font-weight: 500; }
+#vcl-navigation .vcl-project-heading:hover, #vcl-navigation .vcl-thread:hover { background: var(--vcl-hover); }
+#vcl-navigation .vcl-project-heading > .vcl-icon:first-child { width: 12px; flex-basis: 12px; }
+#vcl-navigation .vcl-open { transform: rotate(90deg); }
+#vcl-navigation .vcl-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#vcl-navigation .vcl-current { padding: 0 4px; font-size: 10px; color: var(--vcl-muted); border: 1px solid var(--vcl-border); border-radius: 3px; white-space: nowrap; }
+#vcl-navigation .vcl-group-count { font-size: 11px; color: var(--vcl-muted); }
+#vcl-navigation .vcl-thread { padding-inline-start: 36px; font-size: 12px; }
+#vcl-navigation .vcl-selected { background: var(--vcl-selected); color: var(--vscode-list-inactiveSelectionForeground, var(--vcl-fg)); }
+#vcl-navigation .vcl-activity { width: 6px; height: 6px; flex: 0 0 6px; border-radius: 50%; background: var(--vscode-testing-runAction, #2c9b55); }
+#vcl-navigation .vcl-empty-project { padding: 5px 6px 8px 36px; color: var(--vcl-muted); font-size: 12px; }
+#vcl-navigation .vcl-empty { padding: 22px 12px; text-align: center; color: var(--vcl-muted); }
+#vcl-navigation .vcl-footer { min-height: 36px; display: flex; align-items: center; justify-content: space-between; padding: 4px 8px 4px 12px; border-top: 1px solid var(--vcl-border); }
+#vcl-navigation .vcl-count { font-size: 10px; color: var(--vcl-muted); }
+#vcl-navigation .vcl-resize { position: absolute; inset: 0 -3px 0 auto; width: 6px; cursor: col-resize; touch-action: none; }
+#vcl-navigation .vcl-resize:hover, #vcl-navigation .vcl-resize:focus-visible { background: var(--vscode-focusBorder, #007acc); opacity: .55; }
+#vcl-navigation.vcl-collapsed .vcl-header { padding: 9px 6px; justify-content: center; }
+#vcl-navigation.vcl-collapsed .vcl-heading, #vcl-navigation.vcl-collapsed .vcl-controls,
+#vcl-navigation.vcl-collapsed .vcl-list, #vcl-navigation.vcl-collapsed .vcl-status,
+#vcl-navigation.vcl-collapsed .vcl-footer, #vcl-navigation.vcl-collapsed .vcl-resize,
+#vcl-navigation.vcl-collapsed .vcl-header > button:not(#vcl-toggle) { display: none; }
+#vcl-navigation .vcl-sr-only { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
+#vcl-launcher { position: fixed; z-index: 50; bottom: 12px; left: 10px; background: var(--vscode-sideBar-background, #f8f8f8); color: var(--vscode-sideBar-foreground, #252525); border: 1px solid var(--vscode-panel-border, #ddd); }
+@media (prefers-reduced-motion: no-preference) {
+  #vcl-navigation .vcl-loading .vcl-icon { animation: vcl-spin 1.4s linear infinite; }
+}
+@keyframes vcl-spin { to { transform: rotate(360deg); } }
