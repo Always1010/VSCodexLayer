@@ -27,6 +27,14 @@ node tools/layer.mjs restore --confirm
 
 ## 接入边界
 
+项目按聊天工作目录分组，完整路径区分同名目录。当前工作区没有聊天时仍显示空项目；无法确定目录的聊天放在“未分类”。多根工作区的各根目录均标记为当前项目。“仅当前项目”按规范化后的完整路径精确匹配，不合并子目录或 worktree，也不承诺同步桌面端手动调整的项目归属及所有空项目。聊天列表读取完整分页，不限制为最近 50 条。
+
+点击项目折叠或展开；搜索项目名、路径或聊天标题。搜索期间展开匹配内容。点击聊天只切换右侧官方页面，不改变 VS Code 工作区或聊天原有工作目录。当前聊天由官方路由同步高亮。
+
+顶部图标刷新列表和收起导航；拖动分隔线调整宽度，也可聚焦分隔线后使用左右方向键。列表支持上下、Home、End 移动焦点，项目支持左右方向键折叠与展开。窗口宽度不足 640 像素时导航默认收起，显式操作后记住用户选择。
+
+筛选、折叠状态、宽度及启用状态保存在官方插件的独立命名空间 `vscodexLayer.navigationState.v1`。不占用官方 Webview 的草稿状态。底部返回图标即时恢复原版布局，再用左下角图标启用导航；这不等于卸载文件补丁。列表读取失败时保留已显示内容并显示错误，可刷新重试。
+
 适配层使用已安装插件的现有 App Server 连接读取 `thread/list`。导航通过官方 `navigate-to-route` 消息在发起请求的 Webview 打开聊天。前端路由接入点只报告当前路径，不替换官方路由。增强脚本保留官方 VS Code API 的一次获取机制和 `getState`、`setState` 行为，不另起 Codex 进程、不发送聊天消息。
 
 这属于本地增强补丁，不是官方提供的稳定 UI 扩展接口。相关公共文档：[VS Code Webview](https://code.visualstudio.com/api/extension-guides/webview)、[Codex App Server](https://learn.chatgpt.com/docs/app-server)。
@@ -38,3 +46,5 @@ node tools/layer.mjs restore --confirm
 `node --test tests/host.test.mjs` 使用替身连接检查摘要读取、同面板导航和远程模式拒绝。真实 VS Code 验收需要另行启动窗口，仓库脚本不自动进行。
 
 `node --test tests/bootstrap.test.mjs` 检查官方 API 的一次获取和草稿状态透传。`node tools/check-adapter.mjs` 只读本机官方插件，在临时副本检查接入补丁的语法、应用与恢复。
+
+`node --test tests/navigation.test.mjs` 检查路径分组、当前项目筛选、搜索和完整分页。相关检查按改动范围运行，不自动启动桌面窗口。
