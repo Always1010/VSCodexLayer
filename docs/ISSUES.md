@@ -17,7 +17,7 @@
 - 日期：2026-10-07
 - 状态：已解决
 - 现象：`26.51002.51308` 通过结构兼容探测、应用和语法检查，但启动 VS Code 后没有显示项目导航；Codex 日志记录 `VSCodexLayer host unavailable`。
-- 原因：兼容适配器动态捕获了前端压缩变量，却在宿主注入代码中仍写死旧构建的 VS Code API 命名空间 `Ge` 和 WSL 判断函数 `Wr`。新版实际命名空间为 `je`，初始化时立即触发 `ReferenceError`。
-- 解决方案：从 Webview 初始化函数已有的 `Uri.joinPath(this.extensionUri, "webview")` 调用动态捕获 VS Code API 命名空间，并用该命名空间的 `env.remoteName` 判断 WSL，不再依赖构建相关的压缩标识符。
-- 验证：对当前 `26.51002.51308` 原件生成兼容补丁，确认宿主注入复用动态捕获的 `je` 命名空间且不再引用旧标识符；在临时副本完成语法、应用、重复应用和恢复检查。
+- 原因：兼容适配器动态捕获了前端压缩变量，却在宿主注入代码中仍写死旧构建的 VS Code API 命名空间 `Ge` 和 WSL 判断函数 `Wr`。新版实际 VS Code API 命名空间为 `je`，初始化时立即失败；仅检查语法无法发现这一运行时引用错误。
+- 解决方案：从 Webview 初始化函数已有的 `Uri.joinPath(this.extensionUri, "webview")` 调用动态捕获 VS Code API 命名空间，从官方 WSL 配置判断结构动态捕获运行模式函数，保留 Windows 本地窗口使用 WSL 后端时的拒绝行为；初始化失败时记录实际异常。
+- 验证：对当前 `26.51002.51308` 原件生成兼容补丁，在隔离环境实际执行宿主注入入口及初始化消息，验证本地支持、WSL 后端拒绝、远程 WSL 拒绝和错误日志；在临时副本完成语法、应用、重复应用和恢复检查。
 - 相关文件：`adapters/codex-compatible.mjs`、`tools/check-compatible.mjs`。

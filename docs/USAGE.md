@@ -60,7 +60,7 @@ node tools/layer.mjs restore --confirm
 
 `node --test tests/bootstrap.test.mjs` 检查官方 API 的一次获取和草稿状态透传。`node tools/check-adapter.mjs` 只读本机官方插件，在临时副本检查严格模式接入补丁的语法、应用与恢复。
 
-`node tools/check-compatible.mjs` 对当前实际启用版本生成结构兼容补丁，检查动态资源选择、全部增强标记、JavaScript 语法，并在临时副本验证应用、重复应用和恢复；不会修改实际插件。
+`node tools/check-compatible.mjs` 对当前实际启用版本生成结构兼容补丁，检查动态资源选择、全部增强标记和 JavaScript 语法，在隔离环境执行宿主入口以验证初始化、WSL 支持边界和错误日志，并在临时副本验证应用、重复应用和恢复；不会修改实际插件。
 
 接入检查也支持 `--extension "插件绝对路径"`，目标已经应用补丁时从经过校验的备份读取原件，不复制已修改文件作为原件。
 

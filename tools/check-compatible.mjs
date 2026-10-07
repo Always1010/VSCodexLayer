@@ -3,6 +3,8 @@ import { execFileSync } from 'node:child_process';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import vm from 'node:vm';
+import { createRequire } from 'node:module';
 import { buildCompatiblePatchPlan } from '../adapters/codex-compatible.mjs';
 import { applyPatch, readUnpatched, restorePatch, sha256 } from '../lib/patch-engine.mjs';
 import { findExtension } from './layer.mjs';
@@ -20,7 +22,48 @@ const header = byPath(plan.compatibility.header);
 const host = byPath('out/extension.js');
 const hostNamespace = /require\(([A-Za-z_$][\w$]*)\.Uri\.joinPath\([^)]*"vscodex-layer-host\.cjs"[^)]*\)[\s\S]{0,240}?createLayerHost\(\{vscode:\1,/.exec(host);
 assert.ok(hostNamespace, '宿主注入必须复用当前构建的 VS Code API 命名空间');
-assert.match(host, new RegExp(`isWsl:\\(\\)=>${hostNamespace[1]}\\.env\\.remoteName===\"wsl\"`));
+// Execute the generated entry with only identifiers present in the official source.
+// Syntax and marker checks alone cannot detect undefined minified identifiers.
+const originalHost = (await readUnpatched(directory, 'out/extension.js')).toString();
+const originalNamespace = /let [A-Za-z_$][\w$]*=([A-Za-z_$][\w$]*)\.Uri\.joinPath\(this\.extensionUri,"webview"\)/.exec(originalHost)?.[1];
+const originalWslHelper = /function ([A-Za-z_$][\w$]*)\(\)\{return [A-Za-z_$][\w$]*\("runCodexInWindowsSubsystemForLinux",!1\)\?/.exec(originalHost)?.[1];
+assert.ok(originalNamespace && originalWslHelper, '官方宿主必须包含 VS Code API 和 WSL 运行模式判断');
+const injectionStart = host.indexOf('let __vclHost;');
+const injectionEnd = host.indexOf('let a=e.onDidReceiveMessage', injectionStart);
+assert.ok(injectionStart >= 0 && injectionEnd > injectionStart);
+const injectedEntry = new vm.Script(`(function(){${host.slice(injectionStart, injectionEnd)}return __vclHost;}).call(provider)`);
+const { createLayerHost } = createRequire(import.meta.url)('../runtime/host.cjs');
+const replies = [];
+const warnings = [];
+let backendInWsl = false;
+const disposable = () => ({ dispose() {} });
+const vscode = { Uri: { joinPath: (root, ...parts) => ({ fsPath: path.join(root, ...parts) }) }, env: {},
+  workspace: { workspaceFolders: [], onDidChangeWorkspaceFolders: disposable } };
+const provider = { extensionUri: directory, subscriptions: [], extensionVersion: plan.extensionVersion,
+  logger: { warning: (message) => warnings.push(message) }, globalState: { get: () => ({}) },
+  codexMcpConnection: { registerProvider: disposable, registerInternalNotificationHandler: disposable } };
+const context = vm.createContext({ provider, [originalNamespace]: vscode, [originalWslHelper]: () => backendInWsl,
+  e: { postMessage: (message) => replies.push(message) }, n: disposable,
+  require: (target) => {
+    assert.equal(target, path.join(directory, 'out', 'vscodex-layer-host.cjs'));
+    return { createLayerHost };
+  } });
+const initializedHost = injectedEntry.runInContext(context, { timeout: 1000 });
+try {
+  assert.ok(initializedHost, `生成的宿主入口初始化失败：${warnings.join('\n')}`);
+  assert.equal(provider.subscriptions[0], initializedHost);
+  for (const [remoteName, wsl, supported] of [[undefined, false, true], [undefined, true, false], ['wsl', false, false]]) {
+    vscode.env.remoteName = remoteName;
+    backendInWsl = wsl;
+    assert.equal(initializedHost.handle({ type: 'vscodex-layer/request', id: 'init', method: 'init' }), true);
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(replies.at(-1)?.result?.supported, supported, '宿主初始化必须保留本地及 WSL 支持边界');
+  }
+  assert.equal(warnings.length, 0);
+} finally { initializedHost?.dispose(); }
+context.require = () => { throw new Error('host-load-regression'); };
+assert.equal(injectedEntry.runInContext(context, { timeout: 1000 }), undefined);
+assert.match(warnings.at(-1), /host-load-regression/, '宿主加载失败必须记录实际异常');
 assert.equal((route.match(/projectRoute\(/g) ?? []).length, 1);
 assert.equal((route.match(/vclDraftKey/g) ?? []).length, 13);
 assert.equal((composer.match(/projectCwd\(/g) ?? []).length, 5);
@@ -51,5 +94,5 @@ try {
   for (const entry of plan.files.filter((file) => file.originalHash !== null)) {
     assert.equal(sha256(await fs.readFile(path.join(fixture, entry.path))), entry.originalHash);
   }
-  console.log(`官方 ${plan.extensionVersion} 兼容结构校验通过：${plan.compatibility.family}；动态资源、转换完整性、语法、临时副本应用、重复应用和恢复均通过。实际插件未修改。`);
+  console.log(`官方 ${plan.extensionVersion} 兼容结构校验通过：${plan.compatibility.family}；动态资源、宿主初始化、WSL 边界、异常日志、转换完整性、语法、临时副本应用、重复应用和恢复均通过。实际插件未修改。`);
 } finally { await fs.rm(fixture, { recursive: true, force: true }); }
