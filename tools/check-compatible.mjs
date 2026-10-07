@@ -17,6 +17,10 @@ const byPath = (relative) => plan.files.find((entry) => entry.path === relative)
 const route = byPath(plan.compatibility.route);
 const composer = byPath(plan.compatibility.composer);
 const header = byPath(plan.compatibility.header);
+const host = byPath('out/extension.js');
+const hostNamespace = /require\(([A-Za-z_$][\w$]*)\.Uri\.joinPath\([^)]*"vscodex-layer-host\.cjs"[^)]*\)[\s\S]{0,240}?createLayerHost\(\{vscode:\1,/.exec(host);
+assert.ok(hostNamespace, '宿主注入必须复用当前构建的 VS Code API 命名空间');
+assert.match(host, new RegExp(`isWsl:\\(\\)=>${hostNamespace[1]}\\.env\\.remoteName===\"wsl\"`));
 assert.equal((route.match(/projectRoute\(/g) ?? []).length, 1);
 assert.equal((route.match(/vclDraftKey/g) ?? []).length, 13);
 assert.equal((composer.match(/projectCwd\(/g) ?? []).length, 5);

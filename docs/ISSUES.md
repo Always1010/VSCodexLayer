@@ -11,3 +11,13 @@
 - 解决方案：统一使用 `readOriginal` 按原件 SHA-256 读取当前原件或受校验的备份，并支持显式指定检查目录。
 - 验证：在临时插件副本应用完整补丁后，以该副本为输入运行接入检查；副本内应用、重复应用、语法和恢复检查均通过。实际安装的官方插件未修改。
 - 相关文件：`tools/check-adapter.mjs`、`lib/patch-engine.mjs`、`docs/USAGE.md`。
+
+## ISSUE-002：兼容补丁应用后宿主层无法初始化
+
+- 日期：2026-10-07
+- 状态：已解决
+- 现象：`26.51002.51308` 通过结构兼容探测、应用和语法检查，但启动 VS Code 后没有显示项目导航；Codex 日志记录 `VSCodexLayer host unavailable`。
+- 原因：兼容适配器动态捕获了前端压缩变量，却在宿主注入代码中仍写死旧构建的 VS Code API 命名空间 `Ge` 和 WSL 判断函数 `Wr`。新版实际命名空间为 `je`，初始化时立即触发 `ReferenceError`。
+- 解决方案：从 Webview 初始化函数已有的 `Uri.joinPath(this.extensionUri, "webview")` 调用动态捕获 VS Code API 命名空间，并用该命名空间的 `env.remoteName` 判断 WSL，不再依赖构建相关的压缩标识符。
+- 验证：对当前 `26.51002.51308` 原件生成兼容补丁，确认宿主注入复用动态捕获的 `je` 命名空间且不再引用旧标识符；在临时副本完成语法、应用、重复应用和恢复检查。
+- 相关文件：`adapters/codex-compatible.mjs`、`tools/check-compatible.mjs`。
