@@ -35,10 +35,16 @@ function choose(files, predicate, label) {
 
 function patchHost(source) {
   const anchor = 'let a=e.onDidReceiveMessage(u=>{if(s.markMessageReceived(),';
+  const anchorMatches = [...source.matchAll(new RegExp(anchor.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'))];
+  if (anchorMatches.length !== 1) throw new Error(`宿主消息桥接入点数量异常：${anchorMatches.length}`);
+  const prefix = source.slice(Math.max(0, anchorMatches[0].index - 5000), anchorMatches[0].index);
+  const namespaceMatches = [...prefix.matchAll(new RegExp(`let ${identifier}=(${identifier})\\.Uri\\.joinPath\\(this\\.extensionUri,"webview"\\)`, 'g'))];
+  if (namespaceMatches.length !== 1) throw new Error(`VS Code API 命名空间数量异常：${namespaceMatches.length}`);
+  const vscode = namespaceMatches[0][1];
   return replaceUnique(source, new RegExp(anchor.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')),
-    'let __vclHost;try{__vclHost=require(Ge.Uri.joinPath(this.extensionUri,"out","vscodex-layer-host.cjs").fsPath)'
-    + '.createLayerHost({vscode:Ge,provider:this,webview:e,onDispose:n,isWsl:()=>Wr()});'
-    + 'this.subscriptions.push(__vclHost)}catch(__vclError){this.logger.warning("VSCodexLayer host unavailable")}'
+    `let __vclHost;try{__vclHost=require(${vscode}.Uri.joinPath(this.extensionUri,"out","vscodex-layer-host.cjs").fsPath)`
+    + `.createLayerHost({vscode:${vscode},provider:this,webview:e,onDispose:n,isWsl:()=>${vscode}.env.remoteName==="wsl"});`
+    + 'this.subscriptions.push(__vclHost)}catch(__vclError){this.logger.warning("VSCodexLayer host unavailable: "+String(__vclError?.stack??__vclError))}'
     + 'let a=e.onDidReceiveMessage(u=>{if(__vclHost?.handle(u))return;if(s.markMessageReceived(),', '宿主消息桥');
 }
 
