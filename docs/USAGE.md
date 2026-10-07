@@ -9,12 +9,12 @@
 ```powershell
 node tools/layer.mjs status
 node tools/layer.mjs probe
-node tools/layer.mjs plan
-node tools/layer.mjs apply --confirm
+node tools/layer.mjs plan --compatible
+node tools/layer.mjs apply --compatible --confirm
 node tools/layer.mjs restore --confirm
 ```
 
-`status`、`probe` 和 `plan` 不修改文件。未指定目录时，命令读取 VS Code 的 `.obsolete` 清单并选择当前未过期的最高版本，不把残留的旧插件目录误报为当前版本。`probe` 报告页面入口及路由、目录和首页模块的语义候选；未知版本在完整兼容转换实现前仍标记为不兼容。`apply` 和 `restore` 会修改官方插件安装目录，必须显式加 `--confirm`。关闭所有 VS Code 窗口后应用或恢复，再手动启动 VS Code；打开的 Webview 不会自动热更新。项目脚本不会启动 VS Code 或安装软件。
+`status`、`probe` 和 `plan` 不修改文件。未指定目录时，命令读取 VS Code 的 `.obsolete` 清单并选择当前未过期的最高版本，不把残留的旧插件目录误报为当前版本。`probe` 动态识别页面入口及路由、目录和首页模块，并实际生成内存补丁；只有所有结构化接入点唯一且完整时才报告兼容。`--compatible` 忽略固定版本和整文件哈希，但不跳过官方扩展身份、接入点唯一性、输出语法、备份与冲突检查。`apply` 和 `restore` 会修改官方插件安装目录，必须显式加 `--confirm`。关闭所有 VS Code 窗口后应用或恢复，再手动启动 VS Code；打开的 Webview 不会自动热更新。项目脚本不会启动 VS Code 或安装软件。
 
 补丁修改五个官方文件：宿主入口 `out/extension.js`、页面入口 `webview/index.html`、当前版本的前端路由模块、首页标题／最近聊天模块和聊天创建／输入模块。新增一个宿主适配文件和 `webview/vscodex-layer` 下的前端资源，不修改官方历史聊天数据、账户或系统配置。
 
@@ -22,7 +22,7 @@ node tools/layer.mjs restore --confirm
 
 ## 兼容与恢复
 
-当前仅支持插件版本 `26.5930.51102` 的已核查 Windows 包，校验五个待修改官方文件的 SHA-256。相同版本但文件内容不同也会拒绝应用。未知版本不会自动修改。
+严格模式支持插件版本 `26.5930.51102` 的已核查 Windows 包，校验五个待修改官方文件的 SHA-256。兼容模式按稳定属性发现当前资源，动态捕获压缩局部变量，并要求每个转换点唯一；已验证结构族覆盖 `26.5930.51102` 和 `26.51002.51308`。未知版本必须先通过 `probe`，结构不完整或存在多个候选时拒绝修改。
 
 首次安装或刷新到当前仓库代码，都只需在关闭所有 VS Code 窗口后运行 `node tools/layer.mjs apply --confirm`。已有补丁与当前代码不同时，脚本先校验全部旧文件、原件备份和新补丁，再在同一操作锁内自动恢复并应用当前补丁；相同补丁重复执行不会修改文件。`restore --confirm` 用于单独卸载补丁，更新时无需手动执行。恢复文件补丁不会删除官方草稿。
 
@@ -58,7 +58,9 @@ node tools/layer.mjs restore --confirm
 
 `node --test tests/host.test.mjs` 使用替身连接检查摘要读取、同面板导航、项目目录校验和远程模式拒绝。真实 VS Code 验收需要另行启动窗口，仓库脚本不自动进行。
 
-`node --test tests/bootstrap.test.mjs` 检查官方 API 的一次获取和草稿状态透传。`node tools/check-adapter.mjs` 只读本机官方插件，在临时副本检查接入补丁的语法、应用与恢复。
+`node --test tests/bootstrap.test.mjs` 检查官方 API 的一次获取和草稿状态透传。`node tools/check-adapter.mjs` 只读本机官方插件，在临时副本检查严格模式接入补丁的语法、应用与恢复。
+
+`node tools/check-compatible.mjs` 对当前实际启用版本生成结构兼容补丁，检查动态资源选择、全部增强标记、JavaScript 语法，并在临时副本验证应用、重复应用和恢复；不会修改实际插件。
 
 接入检查也支持 `--extension "插件绝对路径"`，目标已经应用补丁时从经过校验的备份读取原件，不复制已修改文件作为原件。
 
