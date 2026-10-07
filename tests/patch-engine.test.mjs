@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { applyPatch, inspectPatch, restorePatch, sha256 } from '../lib/patch-engine.mjs';
+import { applyPatch, inspectPatch, readUnpatched, restorePatch, sha256 } from '../lib/patch-engine.mjs';
 
 async function fixture(t) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'vscodex-layer-test-'));
@@ -26,6 +26,14 @@ test('应用可重复执行，恢复官方原件并删除新增资源', async (t
   assert.equal(await fs.readFile(path.join(root, 'webview/index.html'), 'utf8'), 'official');
   assert.equal((await inspectPatch(root)).status, 'original');
   await assert.rejects(fs.access(path.join(root, 'webview/layer.js')));
+});
+
+test('已应用补丁时可以安全读取受校验的官方原件', async (t) => {
+  const { root, plan } = await fixture(t);
+  await applyPatch(root, plan);
+  assert.equal((await readUnpatched(root, 'webview/index.html')).toString(), 'official');
+  await fs.writeFile(path.join(root, 'webview/index.html'), 'external');
+  await assert.rejects(readUnpatched(root, 'webview/index.html'), /其他操作修改/);
 });
 
 test('直接应用当前代码可更新旧补丁，文件增减后仍能恢复官方原件', async (t) => {

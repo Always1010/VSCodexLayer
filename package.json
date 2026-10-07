@@ -11,6 +11,7 @@
     "test:navigation": "node --test tests/navigation.test.mjs",
     "test:compatibility": "node --test tests/compatibility.test.mjs",
     "check:adapter": "node tools/check-adapter.mjs",
+    "check:compatible": "node tools/check-compatible.mjs",
     "check:ui": "node tools/check-ui.mjs",
     "layer": "node tools/layer.mjs"
   }
