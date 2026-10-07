@@ -8,12 +8,13 @@
 
 ```powershell
 node tools/layer.mjs status
+node tools/layer.mjs probe
 node tools/layer.mjs plan
 node tools/layer.mjs apply --confirm
 node tools/layer.mjs restore --confirm
 ```
 
-`status` 和 `plan` 不修改文件。`apply` 和 `restore` 会修改官方插件安装目录，必须显式加 `--confirm`。关闭所有 VS Code 窗口后应用或恢复，再手动启动 VS Code；打开的 Webview 不会自动热更新。项目脚本不会启动 VS Code 或安装软件。
+`status`、`probe` 和 `plan` 不修改文件。未指定目录时，命令读取 VS Code 的 `.obsolete` 清单并选择当前未过期的最高版本，不把残留的旧插件目录误报为当前版本。`probe` 报告页面入口及路由、目录和首页模块的语义候选；未知版本在完整兼容转换实现前仍标记为不兼容。`apply` 和 `restore` 会修改官方插件安装目录，必须显式加 `--confirm`。关闭所有 VS Code 窗口后应用或恢复，再手动启动 VS Code；打开的 Webview 不会自动热更新。项目脚本不会启动 VS Code 或安装软件。
 
 补丁修改五个官方文件：宿主入口 `out/extension.js`、页面入口 `webview/index.html`、当前版本的前端路由模块、首页标题／最近聊天模块和聊天创建／输入模块。新增一个宿主适配文件和 `webview/vscodex-layer` 下的前端资源，不修改官方历史聊天数据、账户或系统配置。
 

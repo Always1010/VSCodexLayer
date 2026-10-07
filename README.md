@@ -6,10 +6,11 @@
 
 ```powershell
 node tools/layer.mjs status
+node tools/layer.mjs probe
 node tools/layer.mjs plan
 ```
 
-这两个命令只读。应用及恢复方法、支持范围和接入说明见 [使用与维护](docs/USAGE.md)。
+这些命令只读。`probe` 检查当前实际启用的官方插件及兼容接入点。应用及恢复方法、支持范围和接入说明见 [使用与维护](docs/USAGE.md)。
 
 主要功能：项目分组与折叠、全部／当前项目筛选、项目和聊天搜索、按项目目录新建聊天与独立草稿保留、同面板切换官方聊天、导航宽度调整，以及可恢复的补丁应用。
 

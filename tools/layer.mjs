@@ -1,27 +1,23 @@
-import fs from 'node:fs/promises';
-import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { applyPatch, inspectPatch, restorePatch, validatePlan } from '../lib/patch-engine.mjs';
+import { probeCompatibility } from '../lib/compatibility.mjs';
+import { findInstalledExtension } from '../lib/extension-discovery.mjs';
 import { buildPatchPlan, VERSION } from '../adapters/codex-26.5930.51102.mjs';
 
 export async function findExtension() {
-  const parent = path.join(os.homedir(), '.vscode', 'extensions');
-  const candidates = (await fs.readdir(parent, { withFileTypes: true }))
-    .filter((entry) => entry.isDirectory() && entry.name === `openai.chatgpt-${VERSION}-win32-x64`);
-  if (candidates.length !== 1) throw new Error(`未唯一找到已适配的插件。请使用 --extension 指定 Codex ${VERSION} 的安装目录。`);
-  return path.join(parent, candidates[0].name);
+  return (await findInstalledExtension()).root;
 }
 
 export async function main(args = process.argv.slice(2)) {
   const command = args[0] ?? 'status';
   if (command === 'help' || command === '--help') {
-    console.log('node tools/layer.mjs <status|plan|apply|restore> [--extension 路径] [--confirm]\n'
-      + 'status / plan 只读；apply 安装或更新补丁，自动校验并恢复旧补丁；restore 卸载补丁。\n'
+    console.log('node tools/layer.mjs <status|probe|plan|apply|restore> [--extension 路径] [--confirm]\n'
+      + 'status / probe / plan 只读；apply 安装或更新补丁，自动校验并恢复旧补丁；restore 卸载补丁。\n'
       + 'apply / restore 修改官方插件文件，必须显式加 --confirm。');
     return;
   }
-  if (!['status', 'plan', 'apply', 'restore'].includes(command)) throw new Error('未知命令。运行 help 查看用法。');
+  if (!['status', 'probe', 'plan', 'apply', 'restore'].includes(command)) throw new Error('未知命令。运行 help 查看用法。');
   let directory;
   let confirm = false;
   for (let index = 1; index < args.length; index += 1) {
@@ -33,6 +29,7 @@ export async function main(args = process.argv.slice(2)) {
   directory ??= await findExtension();
   let result;
   if (command === 'status') result = await inspectPatch(directory);
+  else if (command === 'probe') result = await probeCompatibility(directory, VERSION);
   else if (command === 'restore') result = await restorePatch(directory);
   else {
     const plan = await buildPatchPlan(directory);
