@@ -137,6 +137,47 @@ test('部分应用的日志可以恢复，不覆盖外部修改', async (t) => {
   await restorePatch(root);
 });
 
+test('准备及清理中断残留可诊断，非空备份仅在原件校验后隔离', async (t) => {
+  const { root, plan } = await fixture(t);
+  const backup = path.join(root, '.vscodex-layer');
+  const staging = path.join(root, '.vscodex-layer.prepare-1234');
+  await fs.mkdir(staging); await fs.writeFile(path.join(staging, '0.original'), 'official');
+  assert.equal((await inspectPatch(root)).status, 'preparation-residue');
+  assert.equal((await restorePatch(root)).changed, false);
+  await fs.mkdir(backup);
+  assert.equal((await inspectPatch(root)).status, 'backup-empty');
+  assert.equal((await restorePatch(root)).changed, true);
+  await fs.mkdir(backup); await fs.writeFile(path.join(backup, '0.original'), 'official');
+  assert.equal((await inspectPatch(root)).status, 'backup-incomplete');
+  await assert.rejects(restorePatch(root), /清单缺失/);
+  await assert.rejects(applyPatch(root, { ...plan, files: [{ ...plan.files[0], originalHash: sha256('other') }] }), /预期原件/);
+  assert.equal(await fs.readFile(path.join(backup, '0.original'), 'utf8'), 'official');
+  const rename = fs.rename;
+  t.mock.method(fs, 'rename', async (from, to) => {
+    if (to === path.join(root, 'webview/index.html')) {
+      const record = JSON.parse(await fs.readFile(path.join(backup, 'manifest.json'), 'utf8'));
+      assert.equal(record.files.length, plan.files.length, '写官方文件前须有完整清单及备份');
+      assert.equal(sha256(await fs.readFile(path.join(backup, '0.original'))), record.files[0].originalHash);
+    }
+    return rename(from, to);
+  });
+  assert.equal((await applyPatch(root, plan)).status, 'patched');
+  const orphan = (await fs.readdir(root)).find((name) => name.startsWith('.vscodex-layer.orphan-'));
+  assert.ok(orphan);
+  assert.equal(await fs.readFile(path.join(root, orphan, '0.original'), 'utf8'), 'official');
+  assert.equal(await fs.readFile(path.join(staging, '0.original'), 'utf8'), 'official');
+  await restorePatch(root);
+});
+
+test('无清单备份符号链接不得清理或隔离', { skip: process.platform === 'win32' }, async (t) => {
+  const { root, plan } = await fixture(t);
+  const external = path.join(root, 'external'); await fs.mkdir(external);
+  await fs.symlink(external, path.join(root, '.vscodex-layer'));
+  await assert.rejects(applyPatch(root, plan), /符号链接/);
+  await assert.rejects(restorePatch(root), /符号链接/);
+  assert.ok((await fs.lstat(path.join(root, '.vscodex-layer'))).isSymbolicLink());
+});
+
 test('官方更新或备份损坏时不恢复旧文件', async (t) => {
   const { root, plan } = await fixture(t);
   await applyPatch(root, plan);

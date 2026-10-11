@@ -86,7 +86,7 @@ export async function main(args = process.argv.slice(2)) {
     if (command === 'apply') result = await applyPatch(directory, plan);
     else {
       const state = await inspectPatch(directory);
-      if (state.status === 'original') await validatePlan(directory, plan);
+      if (['original', 'backup-empty', 'backup-incomplete', 'preparation-residue'].includes(state.status)) await validatePlan(directory, plan);
       else if (state.status !== 'patched') throw new Error(`当前状态为 ${state.status}，请先检查备份和冲突。`);
       result = { ...state, compatible: true, compatibility: plan.compatibility, changes: plan.files.map((entry) => ({
         path: entry.path, action: entry.originalHash === null ? 'add' : 'patch',
