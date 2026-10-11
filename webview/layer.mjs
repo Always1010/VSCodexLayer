@@ -86,7 +86,7 @@ class Navigation {
     this.cleanups.push(this.client.onEvent((event) => {
       if (event === 'workspace-changed') {
         this.client.request('init').then((next) => {
-          if (!next.supported) { this.dispose(); showLauncher('当前模式暂不支持项目导航'); return; }
+          if (!next.supported) { this.dispose(); showLauncher(next.reason || '当前模式暂不支持项目导航'); return; }
           this.info.folders = next.folders; this.render();
         }).catch((error) => this.showError(error));
       } else if (event === 'threads-changed') this.scheduleRefresh();
@@ -288,7 +288,7 @@ async function start(force = false) {
   started = true; const client = new LayerClient(bridge);
   try {
     const info = await client.request('init');
-    if (!info.supported) { client.dispose(); started = false; showLauncher('第一版仅支持本地工作区'); return; }
+    if (!info.supported) { client.dispose(); started = false; showLauncher(info.reason || '当前模式暂不支持项目导航'); return; }
     if (info.state.disabled && !force) { client.dispose(); started = false; showLauncher('启用项目导航'); return; }
     info.state.disabled = false;
     if (force) await client.request('save-state', { state: info.state });

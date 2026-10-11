@@ -2,7 +2,7 @@
 
 为官方 Codex VS Code 插件增加项目聊天导航，保留官方聊天界面和后端连接。
 
-需要已有 Node.js 22 或更新版本，无需安装 npm 依赖。第一版适配 Windows 本地工作区和 Codex 插件 `26.5930.51102`。
+需要已有 Node.js 22 或更新版本，无需安装 npm 依赖。支持本地工作区，以及 Codex 扩展运行在远程 Linux 宿主上的 VS Code Remote SSH 工作区，包括 Windows 客户端连接 Rock 5B。严格模式适配 Windows 插件 `26.5930.51102`，其他已通过结构探测的包使用兼容模式；真实界面验收范围见使用文档。
 
 ```powershell
 node tools/layer.mjs status

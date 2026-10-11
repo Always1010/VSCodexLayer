@@ -6,7 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 const { createLayerHost } = createRequire(import.meta.url)('../runtime/host.cjs');
 
-function fixture() {
+function fixture(platform = process.platform) {
   const messages = [];
   const requests = [];
   let callbacks;
@@ -18,15 +18,18 @@ function fixture() {
     sendRequest(...args) { requests.push(args); },
   };
   const target = { postMessage(message) { messages.push(message); responses.get(message.id)?.(message); responses.delete(message.id); } };
-  const provider = { codexMcpConnection: connection, extensionVersion: 'test',
+  const extensionUri = { scheme: 'file', fsPath: path.resolve('official-extension') };
+  const extension = { extensionKind: 2, extensionUri };
+  const provider = { codexMcpConnection: connection, extensionVersion: 'test', extensionUri,
     globalState: { async get() { return { mode: 'current', width: 280 }; }, async update() {} },
     postMessageToWebview(view, message) { assert.equal(view, target); messages.push(message); } };
-  const vscode = { env: {}, workspace: { workspaceFolders: [{ name: 'Project', uri: { scheme: 'file', fsPath: 'D:\\Project' } }],
+  const vscode = { env: {}, ExtensionKind: { UI: 1, Workspace: 2 }, extensions: { getExtension: () => extension },
+    workspace: { workspaceFolders: [{ name: 'Project', uri: { scheme: 'file', fsPath: 'D:\\Project' } }],
     onDidChangeWorkspaceFolders() { return { dispose() {} }; } } };
-  const host = createLayerHost({ vscode, provider, webview: target, onDispose() { return { dispose() {} }; }, isWsl: () => false });
+  const host = createLayerHost({ vscode, provider, webview: target, onDispose() { return { dispose() {} }; }, isWsl: () => false, platform });
   const send = (method, params = {}) => host.handle({ type: 'vscodex-layer/request', id: method, method, params });
   const request = (method, params) => new Promise((resolve) => { responses.set(method, resolve); send(method, params); });
-  return { host, vscode, messages, requests, send, request, callbacks: () => callbacks };
+  return { host, vscode, extension, messages, requests, send, request, callbacks: () => callbacks };
 }
 const flush = () => new Promise((resolve) => setImmediate(resolve));
 
@@ -54,13 +57,13 @@ test('同面板导航，只读取聊天摘要，不接管官方消息', async (t
   assert.equal(f.requests.length, 1, '返回空白页不能创建聊天');
 });
 
-test('远程模式和无效路由被拒绝', async (t) => {
+test('不支持的远程工作区和无效路由被拒绝', async (t) => {
   const f = fixture(); t.after(() => f.host.dispose());
   f.vscode.env.remoteName = 'ssh-remote';
   f.send('init'); await flush();
   assert.equal(f.messages.at(-1).result.supported, false);
   f.send('list'); await flush();
-  assert.match(f.messages.at(-1).error, /本地工作区/);
+  assert.match(f.messages.at(-1).error, /同一 SSH 主机/);
   f.vscode.env.remoteName = undefined;
   f.send('navigate', { threadId: '../settings' }); await flush();
   assert.match(f.messages.at(-1).error, /编号无效/);
@@ -99,5 +102,47 @@ test('项目新聊天绑定完整目录，不创建线程，失效目录拒绝�
   await fs.rmdir(other);
   assert.match((await f.request('validate-project', { cwd: other })).error, /不存在或无法访问/);
   f.vscode.env.remoteName = 'ssh-remote';
-  assert.match((await f.request('new-project-chat', { cwd: current, path: '/' })).error, /本地工作区/);
+  assert.match((await f.request('new-project-chat', { cwd: current, path: '/' })).error, /同一 SSH 主机/);
+});
+
+test('Linux SSH 宿主读取同主机聊天并校验远程目录，错误宿主拒绝请求', async (t) => {
+  const directory = await fs.mkdtemp(path.join(await fs.realpath(os.tmpdir()), 'vscodex-ssh-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const f = fixture('linux'); t.after(() => f.host.dispose());
+  f.vscode.env.remoteName = 'ssh-remote';
+  const remoteFolder = { name: 'Remote', uri: { scheme: 'vscode-remote', authority: 'ssh-remote+rock5b', fsPath: directory } };
+  f.vscode.workspace.workspaceFolders = [remoteFolder];
+  const init = (await f.request('init')).result;
+  assert.equal(init.supported, true);
+  assert.equal(init.mode, 'ssh-remote');
+  assert.equal(init.folders[0].path, directory);
+  const reply = await f.request('new-project-chat', { cwd: directory, path: '/' });
+  assert.equal(reply.result.cwd, directory);
+  assert.equal(f.requests.length, 0, '打开 SSH 项目草稿不创建线程');
+  const pending = f.request('list'); await flush();
+  f.callbacks().onResult({ id: f.requests.at(-1)[1], result: { data: [{ id: 'ssh-thread', cwd: directory }], nextCursor: null } });
+  assert.equal((await pending).result.data[0].cwd, directory);
+  await f.request('navigate', { threadId: 'ssh-thread' });
+  assert.deepEqual(f.messages.at(-2), { type: 'navigate-to-route', path: '/local/ssh-thread' });
+  assert.ok((await f.request('validate-project', { cwd: 'D:\\Project' })).error);
+  await fs.rmdir(directory);
+  assert.match((await f.request('validate-project', { cwd: directory })).error, /不存在或无法访问/);
+  for (const mutate of [
+    () => { f.extension.extensionKind = 1; },
+    () => { f.extension.extensionKind = 2; f.vscode.workspace.workspaceFolders = [remoteFolder,
+      { ...remoteFolder, uri: { ...remoteFolder.uri, authority: 'ssh-remote+other' } }]; },
+    () => { f.vscode.env.remoteName = 'dev-container'; },
+    () => { f.vscode.env.remoteName = 'wsl'; },
+  ]) {
+    mutate();
+    assert.equal((await f.request('init')).result.supported, false);
+    const before = f.requests.length;
+    assert.ok((await f.request('list')).error);
+    assert.ok((await f.request('new-project-chat', { cwd: directory, path: '/' })).error);
+    assert.equal(f.requests.length, before);
+  }
+  const windows = fixture('win32'); t.after(() => windows.host.dispose());
+  windows.vscode.env.remoteName = 'ssh-remote';
+  windows.vscode.workspace.workspaceFolders = [remoteFolder];
+  assert.equal((await windows.request('init')).result.supported, false);
 });

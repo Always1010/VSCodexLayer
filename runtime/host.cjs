@@ -27,16 +27,40 @@ function summary(thread) {
     status: typeof thread.status?.type === 'string' ? thread.status.type : 'notLoaded' };
 }
 
-exports.createLayerHost = function createLayerHost({ vscode, provider, webview, onDispose, isWsl }) {
+function workspaceSupport(vscode, provider, isWsl, platform) {
+  const folders = vscode.workspace.workspaceFolders ?? [];
+  const unsupported = (reason) => ({ supported: false, mode: 'unsupported', reason });
+  if (isWsl() || vscode.env.remoteName === 'wsl') return unsupported('项目导航暂不支持 WSL 模式。');
+  if (!vscode.env.remoteName) {
+    return folders.every(({ uri }) => uri.scheme === 'file')
+      ? { supported: true, mode: 'local', reason: null }
+      : unsupported('项目导航暂不支持虚拟工作区。');
+  }
+  if (vscode.env.remoteName !== 'ssh-remote') return unsupported('项目导航目前仅支持本地和 Linux Remote SSH 工作区。');
+  const extension = vscode.extensions?.getExtension('openai.chatgpt');
+  if (platform !== 'linux' || vscode.ExtensionKind?.Workspace === undefined
+    || extension?.extensionKind !== vscode.ExtensionKind.Workspace
+    || provider.extensionUri?.scheme !== 'file' || extension.extensionUri?.scheme !== 'file'
+    || !provider.extensionUri.fsPath || !extension.extensionUri.fsPath
+    || path.resolve(provider.extensionUri.fsPath) !== path.resolve(extension.extensionUri.fsPath)) {
+    return unsupported('Remote SSH 项目导航需要 Codex 扩展运行在远程 Linux 工作区宿主。');
+  }
+  const authorities = new Set(folders.map(({ uri }) => uri.authority));
+  if (!folders.every(({ uri }) => uri.scheme === 'vscode-remote' && uri.authority?.startsWith('ssh-remote+'))
+    || authorities.size > 1) return unsupported('Remote SSH 工作区必须使用同一 SSH 主机的远程目录。');
+  return { supported: true, mode: 'ssh-remote', reason: null };
+}
+
+exports.createLayerHost = function createLayerHost({ vscode, provider, webview, onDispose, isWsl, platform = process.platform }) {
   const name = `VSCodexLayer-${randomUUID()}`;
   const pending = new Map();
   const disposables = [];
   let disposed = false;
   const post = (message) => { if (!disposed) Promise.resolve(webview.postMessage(message)).catch(() => {}); };
   const folders = () => (vscode.workspace.workspaceFolders ?? []).map((folder) => ({
-    name: folder.name, path: folder.uri.fsPath, scheme: folder.uri.scheme,
+    name: folder.name, path: folder.uri.fsPath, scheme: folder.uri.scheme, authority: folder.uri.authority,
   }));
-  const supported = () => !vscode.env.remoteName && !isWsl() && folders().every((folder) => folder.scheme === 'file');
+  const support = () => workspaceSupport(vscode, provider, isWsl, platform);
   const rejectAll = (error) => {
     for (const [id, request] of pending) {
       clearTimeout(request.timer);
@@ -76,7 +100,7 @@ exports.createLayerHost = function createLayerHost({ vscode, provider, webview, 
   }
   async function validateProject(cwd) {
     if (typeof cwd !== 'string' || !cwd || cwd.length > 4096 || cwd.includes('\0') || !path.isAbsolute(cwd)) {
-      throw new Error('项目必须具有有效的本地绝对目录。');
+      throw new Error('项目必须具有当前运行主机上的有效绝对目录。');
     }
     const directory = path.resolve(cwd);
     try {
@@ -86,9 +110,10 @@ exports.createLayerHost = function createLayerHost({ vscode, provider, webview, 
     return { cwd: directory };
   }
   async function run(method, params) {
-    if (method === 'init') return { supported: supported(), folders: folders(),
+    if (method === 'init') return { ...support(), folders: folders(),
       state: cleanState(await provider.globalState.get(STATE_KEY)), version: provider.extensionVersion };
-    if (!supported()) throw new Error('第一版仅支持本地工作区，不支持远程或 WSL 模式。');
+    const environment = support();
+    if (!environment.supported) throw new Error(environment.reason);
     if (method === 'list') {
       if (params.cursor != null && (typeof params.cursor !== 'string' || params.cursor.length > 16384)) throw new Error('分页参数无效。');
       const result = await list(params.cursor);

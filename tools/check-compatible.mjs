@@ -37,9 +37,12 @@ const replies = [];
 const warnings = [];
 let backendInWsl = false;
 const disposable = () => ({ dispose() {} });
-const vscode = { Uri: { joinPath: (root, ...parts) => ({ fsPath: path.join(root, ...parts) }) }, env: {},
+const extensionUri = { scheme: 'file', fsPath: directory };
+const vscode = { Uri: { joinPath: (root, ...parts) => ({ fsPath: path.join(root.fsPath, ...parts) }) }, env: {},
+  ExtensionKind: { UI: 1, Workspace: 2 },
+  extensions: { getExtension: () => ({ extensionKind: 2, extensionUri }) },
   workspace: { workspaceFolders: [], onDidChangeWorkspaceFolders: disposable } };
-const provider = { extensionUri: directory, subscriptions: [], extensionVersion: plan.extensionVersion,
+const provider = { extensionUri, subscriptions: [], extensionVersion: plan.extensionVersion,
   logger: { warning: (message) => warnings.push(message) }, globalState: { get: () => ({}) },
   codexMcpConnection: { registerProvider: disposable, registerInternalNotificationHandler: disposable } };
 const context = vm.createContext({ provider, [originalNamespace]: vscode, [originalWslHelper]: () => backendInWsl,
@@ -52,12 +55,16 @@ const initializedHost = injectedEntry.runInContext(context, { timeout: 1000 });
 try {
   assert.ok(initializedHost, `生成的宿主入口初始化失败：${warnings.join('\n')}`);
   assert.equal(provider.subscriptions[0], initializedHost);
-  for (const [remoteName, wsl, supported] of [[undefined, false, true], [undefined, true, false], ['wsl', false, false]]) {
+  for (const [remoteName, wsl, supported] of [[undefined, false, true], [undefined, true, false], ['wsl', false, false],
+    ['ssh-remote', false, process.platform === 'linux'], ['dev-container', false, false]]) {
     vscode.env.remoteName = remoteName;
     backendInWsl = wsl;
+    vscode.workspace.workspaceFolders = remoteName === 'ssh-remote'
+      ? [{ name: 'Remote', uri: { scheme: 'vscode-remote', authority: 'ssh-remote+rock5b', fsPath: '/home/ubuntu/project' } }]
+      : [];
     assert.equal(initializedHost.handle({ type: 'vscodex-layer/request', id: 'init', method: 'init' }), true);
     await new Promise((resolve) => setImmediate(resolve));
-    assert.equal(replies.at(-1)?.result?.supported, supported, '宿主初始化必须保留本地及 WSL 支持边界');
+    assert.equal(replies.at(-1)?.result?.supported, supported, '宿主初始化必须识别本地、SSH 和 WSL 支持边界');
   }
   assert.equal(warnings.length, 0);
 } finally { initializedHost?.dispose(); }
@@ -94,5 +101,5 @@ try {
   for (const entry of plan.files.filter((file) => file.originalHash !== null)) {
     assert.equal(sha256(await fs.readFile(path.join(fixture, entry.path))), entry.originalHash);
   }
-  console.log(`官方 ${plan.extensionVersion} 兼容结构校验通过：${plan.compatibility.family}；动态资源、宿主初始化、WSL 边界、异常日志、转换完整性、语法、临时副本应用、重复应用和恢复均通过。实际插件未修改。`);
+  console.log(`官方 ${plan.extensionVersion} 兼容结构校验通过：${plan.compatibility.family}；动态资源、宿主初始化、SSH / WSL 边界、异常日志、转换完整性、语法、临时副本应用、重复应用和恢复均通过。实际插件未修改。`);
 } finally { await fs.rm(fixture, { recursive: true, force: true }); }
