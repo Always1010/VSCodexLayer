@@ -7,7 +7,7 @@ import { PassThrough } from 'node:stream';
 import { probeCompatibility } from '../lib/compatibility.mjs';
 import { findInstalledExtension } from '../lib/extension-discovery.mjs';
 import { findExtension } from '../tools/layer.mjs';
-import { patchReasoningActivity, patchReasoningRenderer } from '../adapters/reasoning.mjs';
+import { patchReasoningActivity, patchReasoningRenderer, patchReadTarget } from '../adapters/reasoning.mjs';
 
 async function extension(parent, version, files = {}, platform = 'win32-x64') {
   const root = path.join(parent, `openai.chatgpt-${version}-${platform}`);
@@ -132,4 +132,8 @@ test('推理摘要结构缺失、歧义或重复补丁时拒绝转换', () => {
     assert.throws(() => transform(patched), /数量异常/);
   }
   assert.throws(() => patchReasoningRenderer(renderer.replace('onToggle:', 'changedControl:')), /缺少/);
+  const assistant = 'function render(p){let t=(0,Cache.c)(3),{item:n,assistantCopyText:r,turnId:i,cwd:d,conversationId:l,hostId:f}=p;return(0,JSX.jsx)(Body,{item:n})}function next(){}';
+  assert.throws(() => patchReadTarget('unknown layout'), /数量异常/);
+  assert.throws(() => patchReadTarget(assistant + assistant), /数量异常/);
+  assert.throws(() => patchReadTarget(patchReadTarget(assistant).content), /重复转换/);
 });

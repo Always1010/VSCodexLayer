@@ -71,15 +71,30 @@ export class ThreadActivity {
   constructor(unread = []) {
     this.unread = new Set(unread);
     this.statuses = new Map();
+    this.completedReplies = new Map();
   }
   receive(event) {
     if (event?.type !== 'thread-activity' || typeof event.threadId !== 'string') return false;
     this.statuses.set(event.threadId, { status: event.status, activeFlags: event.activeFlags ?? [] });
-    if (event.phase === 'started') this.unread.delete(event.threadId);
-    if (event.phase === 'completed') this.unread.add(event.threadId);
+    if (event.phase === 'started') {
+      this.unread.delete(event.threadId); this.completedReplies.delete(event.threadId);
+    }
+    if (event.phase === 'completed') {
+      this.unread.add(event.threadId);
+      this.completedReplies.set(event.threadId, { itemId: event.replyItemId });
+    }
     return true;
   }
-  acknowledge(threadId) { return this.unread.delete(threadId); }
+  acknowledge(threadId) {
+    this.completedReplies.delete(threadId);
+    return this.unread.delete(threadId);
+  }
+  acknowledgeReply(threadId, completion) {
+    const { status, activeFlags = [] } = this.statuses.get(threadId) ?? {};
+    if (!completion || this.completedReplies.get(threadId) !== completion || status === 'systemError'
+      || status === 'active' && activeFlags.some((flag) => ['waitingOnApproval', 'waitingOnUserInput'].includes(flag))) return false;
+    return this.acknowledge(threadId);
+  }
   indicator(thread) {
     const { status, activeFlags = [] } = this.statuses.get(thread.id) ?? thread;
     if (status === 'active' && activeFlags.includes('waitingOnApproval')) return { kind: 'attention', label: '等待审批' };

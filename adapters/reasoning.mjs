@@ -55,6 +55,27 @@ export function patchReasoningRenderer(source) {
   renderer: match[1] };
 }
 
+export function patchReadTarget(source) {
+  if (source.includes('__vclNativeAssistantMessage')) throw new Error('最新回复阅读标记已存在，拒绝重复转换。');
+  const signature = new RegExp(`function (${identifier})\\((${identifier})\\)\\{let ${identifier}=\\(0,${identifier}\\.c\\)\\(\\d+\\),\\{item:(${identifier}),assistantCopyText:${identifier},turnId:${identifier},[^}]+conversationId:${identifier},`, 'g');
+  const match = unique([...source.matchAll(signature)], '最新回复阅读标记');
+  const end = source.indexOf('}function ', match.index);
+  if (end < 0) throw new Error('最新回复组件函数边界异常。');
+  const body = source.slice(match.index, end + 1);
+  const jsx = new RegExp(`\\(0,(${identifier})\\.jsx[s]?\\)`).exec(body)?.[1];
+  if (!jsx) throw new Error('最新回复组件缺少 JSX 接入点。');
+  const props = match[2];
+  // display:contents preserves native layout; measure the native Markdown beneath this marker.
+  const wrapper = `function ${match[1]}(${props}){let __vclItem=${props}.item;`
+    + `return(0,${jsx}.jsx)(\`div\`,{style:{display:\`contents\`},`
+    + `"data-vcl-reply-thread":${props}.conversationId,"data-vcl-reply-item":__vclItem.searchItemId,`
+    + `"data-vcl-reply-completed":__vclItem.completed===true&&__vclItem.phase!==\`commentary\`&&!__vclItem.isSkippedCompletion,`
+    + `children:(0,${jsx}.jsx)(__vclNativeAssistantMessage,${props})});}`;
+  return { content: source.slice(0, match.index) + wrapper
+    + body.replace(`function ${match[1]}(`, 'function __vclNativeAssistantMessage(') + source.slice(end + 1),
+    component: match[1] };
+}
+
 export async function buildReasoningPatchFiles(root) {
   const entries = await fs.readdir(path.join(root, 'webview', 'assets'));
   async function select(prefix, marker) {
@@ -69,12 +90,13 @@ export async function buildReasoningPatchFiles(root) {
   const renderer = await select('sites-end-resource-', 'reasoning-markdown');
   const activityPatch = patchReasoningActivity(activity.bytes.toString());
   const rendererPatch = patchReasoningRenderer(renderer.bytes.toString());
+  const readTarget = patchReadTarget(rendererPatch.content);
   return {
     files: [
       { path: activity.path, originalHash: sha256(activity.bytes), content: activityPatch.content },
-      { path: renderer.path, originalHash: sha256(renderer.bytes), content: rendererPatch.content },
+      { path: renderer.path, originalHash: sha256(renderer.bytes), content: readTarget.content },
     ],
     compatibility: { activity: activity.path, renderer: renderer.path,
-      classifier: activityPatch.classifier, component: rendererPatch.renderer },
+      classifier: activityPatch.classifier, component: rendererPatch.renderer, readTarget: readTarget.component },
   };
 }

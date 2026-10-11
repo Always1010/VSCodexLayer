@@ -34,6 +34,21 @@ export async function checkNativeReasoning(plan) {
   assert.equal(classify({ type: 'automatic-approval-review', status: 'approved' }), null);
 
   const renderer = source(info.renderer);
+  const readWrapper = functionSource(renderer, info.readTarget);
+  const readJsx = /\(0,([\w$]+)\.jsx\)/.exec(readWrapper)[1];
+  const readContext = vm.createContext({ [readJsx]: { jsx: (type, props) => ({ type, props }) },
+    __vclNativeAssistantMessage: (props) => props });
+  vm.runInContext(readWrapper, readContext);
+  for (const [completed, phase, expected] of [[false, 'final_answer', false], [true, 'commentary', false],
+    [true, 'final_answer', true], [true, null, true]]) {
+    const props = { conversationId: 'current', item: { searchItemId: 'reply', content: '正文', completed, phase } };
+    const result = readContext[info.readTarget](props);
+    assert.equal(result.props['data-vcl-reply-thread'], 'current');
+    assert.equal(result.props['data-vcl-reply-item'], 'reply');
+    assert.equal(result.props['data-vcl-reply-completed'], expected);
+    assert.equal(result.props.children.props, props, '阅读标记不改写官方回复或渲染参数');
+    assert.equal(result.props.style.display, 'contents', '阅读标记不增加布局盒子');
+  }
   const wrapper = functionSource(renderer, info.component);
   const reactName = /\(0,([\w$]+)\.useSyncExternalStore\)/.exec(wrapper)[1];
   const jsxName = /\(0,([\w$]+)\.jsx\)/.exec(wrapper)[1];

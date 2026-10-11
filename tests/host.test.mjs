@@ -50,6 +50,9 @@ test('审批和输入状态保留，结束事件只转发导航所需字段', as
       { phase: 'completed', status: 'idle', activeFlags: [] }],
     ['turn/completed', { threadId: 'one', turn: { status: 'failed', error: 'secret' } },
       { phase: 'completed', status: 'systemError', activeFlags: [] }],
+    ['turn/completed', { threadId: 'one', turn: { id: 'turn', status: 'completed',
+      items: [{ type: 'agentMessage', id: 'reply', phase: 'final_answer', text: 'secret' }] } },
+      { phase: 'completed', status: 'idle', activeFlags: [], replyItemId: 'reply' }],
   ]) {
     f.messages.length = 0; f.notify({ method, params });
     assert.deepEqual(f.messages, [
@@ -57,6 +60,19 @@ test('审批和输入状态保留，结束事件只转发导航所需字段', as
       { type: 'vscodex-layer/event', event: 'threads-changed' },
     ]);
   }
+  f.messages.length = 0;
+  f.notify({ method: 'item/completed', params: { threadId: 'one', turnId: 'next',
+    item: { type: 'agentMessage', id: 'last-reply', phase: 'final_answer', text: 'secret' } } });
+  f.notify({ method: 'item/completed', params: { threadId: 'one', turnId: 'next',
+    item: { type: 'agentMessage', id: 'commentary', phase: 'commentary', text: 'secret' } } });
+  assert.deepEqual(f.messages, [], '回复正文和中间进度不得转发给导航');
+  f.notify({ method: 'turn/completed', params: { threadId: 'one', turn: { id: 'next', status: 'completed', items: [] } } });
+  assert.equal(f.messages[0].event.replyItemId, 'last-reply', '结束通知没有 items 时沿用同轮次的已完成回复编号');
+  f.messages.length = 0;
+  f.notify({ method: 'item/completed', params: { threadId: 'one', turnId: 'old',
+    item: { type: 'agentMessage', id: 'old-reply', phase: 'final_answer' } } });
+  f.notify({ method: 'turn/completed', params: { threadId: 'one', turn: { id: 'new', status: 'completed' } } });
+  assert.equal(f.messages[0].event.replyItemId, undefined, '不能关联其他轮次的回复');
   const state = (await f.request('init')).result.state;
   assert.deepEqual(state.unread, []);
   await f.request('save-state', { state: { unread: ['one', '../invalid', null, 'x'.repeat(201)] } });

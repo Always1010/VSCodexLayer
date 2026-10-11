@@ -31,6 +31,29 @@ test('提醒优先于运行，结束提示保留至查看，新轮次清除旧�
   assert.equal(activity.indicator(thread).label, '运行出错，需要查看');
 });
 
+test('阅读回执绑定完成轮次，旧回执不能清除新提醒及审批或错误', () => {
+  const activity = new ThreadActivity();
+  const event = (phase, status = 'idle', activeFlags = []) => activity.receive({
+    type: 'thread-activity', threadId: 'current', phase, status, activeFlags, replyItemId: 'reply',
+  });
+  event('completed');
+  const previous = activity.completedReplies.get('current');
+  event('started', 'active');
+  event('completed');
+  assert.equal(activity.acknowledgeReply('current', previous), false);
+  assert.equal(activity.unread.has('current'), true);
+  const current = activity.completedReplies.get('current');
+  for (const flag of ['waitingOnApproval', 'waitingOnUserInput']) {
+    event('status', 'active', [flag]);
+    assert.equal(activity.acknowledgeReply('current', current), false);
+  }
+  event('status', 'systemError');
+  assert.equal(activity.acknowledgeReply('current', current), false);
+  event('status');
+  assert.equal(activity.acknowledgeReply('current', current), true);
+  assert.equal(activity.unread.has('current'), false);
+});
+
 test('Windows 路径规范化、同名项目和多根当前项目正确区分', () => {
   assert.equal(normalizePath('D:\\WRK\\Project\\'), normalizePath('file:///d:/WRK/Project'));
   assert.equal(normalizePath('\\\\?\\UNC\\Server\\Share\\'), '//server/share');
