@@ -14,7 +14,7 @@ node tools/layer.mjs apply --compatible --confirm
 node tools/layer.mjs restore --confirm
 ```
 
-`status`、`probe` 和 `plan` 不修改文件。未指定目录时，命令读取 VS Code 的 `.obsolete` 清单并选择当前未过期的最高版本，不把残留的旧插件目录误报为当前版本。`probe` 的 `compatible` 与 `patchCompatible` 仅表示补丁结构兼容，`runtimeSupport.verified` 为 `false`；真正的运行环境支持在 VS Code 内初始化时判断。`probe` 动态识别页面入口及路由、目录和首页模块，并实际生成内存补丁；只有所有结构化接入点唯一且完整时才报告兼容。`--compatible` 忽略固定版本和整文件哈希，但不跳过官方扩展身份、接入点唯一性、输出语法、备份与冲突检查。`apply` 和 `restore` 会修改官方插件安装目录，必须显式加 `--confirm`。关闭所有 VS Code 窗口后应用或恢复，再手动启动 VS Code；打开的 Webview 不会自动热更新。项目脚本不会启动 VS Code 或安装软件。
+`status`、`probe` 和 `plan` 不修改文件。未指定目录时，命令读取 VS Code 的 `.obsolete` 清单并选择当前未过期的最高版本，不把残留的旧插件目录误报为当前版本。缺失或空白的 `.obsolete` 视为没有过期标记，仍遵循安装清单；非空但损坏的 `.obsolete` 或损坏的 `extensions.json` 会停止发现并指出文件路径，脚本不改写这些清单。`probe` 的 `compatible` 与 `patchCompatible` 仅表示补丁结构兼容，`runtimeSupport.verified` 为 `false`；真正的运行环境支持在 VS Code 内初始化时判断。`probe` 动态识别页面入口及路由、目录和首页模块，并实际生成内存补丁；只有所有结构化接入点唯一且完整时才报告兼容。`--compatible` 忽略固定版本和整文件哈希，但不跳过官方扩展身份、接入点唯一性、输出语法、备份与冲突检查。`apply` 和 `restore` 会修改官方插件安装目录，必须显式加 `--confirm`。关闭所有 VS Code 窗口后应用或恢复，再手动启动 VS Code；打开的 Webview 不会自动热更新。项目脚本不会启动 VS Code 或安装软件。
 
 补丁修改七个官方文件：宿主入口 `out/extension.js`、页面入口 `webview/index.html`、当前版本的前端路由模块、首页标题／最近聊天模块、聊天创建／输入模块、活动分类模块和推理摘要渲染模块。新增一个宿主适配文件和 `webview/vscodex-layer` 下的前端资源，不修改官方历史聊天数据、账户或系统配置。
 
