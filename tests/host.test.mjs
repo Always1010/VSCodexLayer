@@ -436,3 +436,24 @@ test('活动通知不触发完整列表刷新，归档通知携带目标编号',
   f.notify({ method: 'thread/archived', params: { threadId: 'thread' } });
   assert.deepEqual(f.messages[0].event, { type: 'threads-changed', method: 'thread/archived', threadId: 'thread' });
 });
+
+test('创建通知立即转发安全摘要，标题更新无需等待分页，子任务不入列', (t) => {
+  const f = fixture(); t.after(() => f.host.dispose());
+  const thread = { id: 'created', cwd: '/project', name: null, preview: '', createdAt: 123, updatedAt: 124,
+    source: 'vscode', status: { type: 'idle' }, turns: ['private transcript'], model: 'private model' };
+  f.notify({ method: 'thread/started', params: { thread } });
+  const changed = f.messages.find((message) => message.event?.type === 'threads-changed').event;
+  assert.deepEqual(changed, { type: 'threads-changed', method: 'thread/started', threadId: 'created',
+    thread: { id: 'created', title: '未命名聊天', cwd: '/project', createdAt: 123, updatedAt: 124, status: 'idle', activeFlags: [] } });
+  assert.equal(f.requests.length, 0, '立即展示不发起另一条后端查询');
+  f.notify({ method: 'thread/name/updated', params: { threadId: 'created', threadName: ' 新标题\n第二行 ', turns: ['secret'] } });
+  assert.deepEqual(f.messages.at(-1).event, { type: 'threads-changed', method: 'thread/name/updated', threadId: 'created', title: '新标题 第二行' });
+  for (const extra of [{ source: { subAgent: { thread_spawn: {} } } }, { ephemeral: true }, { threadSource: 'mcp_extension_host' }]) {
+    f.notify({ method: 'thread/started', params: { thread: { ...thread, ...extra } } });
+    assert.equal('thread' in f.messages.at(-1).event, false, '完整列表不包含的子任务不能通过创建事件入列');
+  }
+  f.notify({ method: 'thread/started', params: { thread: { ...thread, id: '../invalid' } } });
+  assert.equal('thread' in f.messages.at(-1).event, false);
+  f.notify({ method: 'thread/name/updated', params: { threadId: 'created', threadName: '  ' } });
+  assert.equal('title' in f.messages.at(-1).event, false, '空标题不能覆盖已有标题');
+});

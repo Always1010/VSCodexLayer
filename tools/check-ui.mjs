@@ -33,11 +33,11 @@ const page = `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8">
 *{box-sizing:border-box}html,body,#root{margin:0;height:100%;width:100%}body{font-family:"Segoe UI","Microsoft YaHei",sans-serif;background:#fff;color:#282828}#root{display:flex;flex-direction:column;padding:24px;background:inherit}header{font-size:14px}article{flex:1;padding:40px 5%;line-height:1.8}article h1{font-size:22px}article p{max-width:600px;color:#777}textarea{width:100%;height:100px;padding:18px;border:1px solid #ddd;border-radius:20px;font:inherit;resize:none;background:inherit;color:inherit}.note{font-size:11px;color:#888;margin-top:8px}
 </style>
 <script>
-window.mockThreads=${JSON.stringify(threads)};window.mockState={revision:0,mode:'all',width:250,groups:[],collapsed:null,disabled:false,pinnedProjects:[],unread:[],unreadTurns:{}};window.mockRegistry={revision:0,projects:[]};window.mockPickedFolder=null;window.mockCannotOpen=false;window.mockSaveFailure=false;window.mockCopiedPath=null;window.mockRequests=[];window.mockRoute='/';window.mockDrafts={'/':'未发送的草稿','/local/thread-8':'历史聊天自己的草稿'};window.mockSubmissions=0;window.mockUnavailable=new Set();let acquired=false;
+window.mockThreads=${JSON.stringify(threads)};window.mockState={revision:0,mode:'all',width:250,groups:[],collapsed:null,disabled:false,pinnedProjects:[],unread:[],unreadTurns:{}};window.mockRegistry={revision:0,projects:[]};window.mockPickedFolder=null;window.mockCannotOpen=false;window.mockSaveFailure=false;window.mockCopiedPath=null;window.mockRequests=[];window.mockRoute='/';window.mockDrafts={'/':'未发送的草稿','/local/thread-8':'历史聊天自己的草稿'};window.mockSubmissions=0;window.mockDelayIndex=false;window.mockUnindexed=[];window.mockUnavailable=new Set();let acquired=false;
 window.mockDraftKey=path=>{const url=new URL(path,location.origin);return __vscodexLayerBridge.projectRoute(url.pathname,url.pathname,url.search)?.vclDraftKey??path};
 window.mockNavigate=path=>{mockRoute=path;__vscodexLayerBridge.observeRoute(path);document.querySelector('#native-title').textContent=path==='/'?'':mockThreads.find(t=>'/local/'+t.id===path)?.title??'新聊天';const previous=document.querySelector('#native-composer');const next=previous.cloneNode();next.value=mockDrafts[mockDraftKey(path)]??'';next.oninput=()=>{mockDrafts[mockDraftKey(mockRoute)]=next.value};previous.replaceWith(next);document.querySelector('[data-vcl-home-history]').hidden=path!=='/'};
 window.mockNewChat=()=>{if(!__vscodexLayerBridge.resumeDraft({selectChat:true}))mockNavigate('/')};
-window.mockSubmit=async success=>{if(!success)return;const url=new URL(mockRoute,location.origin);const project=__vscodexLayerBridge.projectRoute(url.pathname,url.pathname,url.search);if(project)await __vscodexLayerBridge.validateProject(project.vclProjectCwd);mockSubmissions++;mockDrafts[mockDraftKey(mockRoute)]='';const thread={id:mockSubmissions===1?'sent-thread':'sent-thread-'+mockSubmissions,title:'新发送的聊天',cwd:project?.vclProjectCwd??'D:/WRK/VSCodexLayer',createdAt:2000+mockSubmissions,updatedAt:2000};mockThreads.unshift(thread);mockNavigate('/local/'+thread.id);window.postMessage({type:'vscodex-layer/event',event:'threads-changed'},location.origin)};
+window.mockSubmit=async success=>{if(!success)return;const url=new URL(mockRoute,location.origin);const project=__vscodexLayerBridge.projectRoute(url.pathname,url.pathname,url.search);if(project)await __vscodexLayerBridge.validateProject(project.vclProjectCwd);mockSubmissions++;mockDrafts[mockDraftKey(mockRoute)]='';const thread={id:mockSubmissions===1?'sent-thread':'sent-thread-'+mockSubmissions,title:'新发送的聊天',cwd:project?.vclProjectCwd??'D:/WRK/VSCodexLayer',createdAt:2000+mockSubmissions,updatedAt:2000};if(mockDelayIndex)mockUnindexed.push(thread);else mockThreads.unshift(thread);mockNavigate('/local/'+thread.id);window.postMessage({type:'vscodex-layer/event',event:{type:'threads-changed',method:'thread/started',threadId:thread.id,thread:structuredClone(thread)}},location.origin)};
 window.acquireVsCodeApi=()=>{if(acquired)throw Error('API acquired twice');acquired=true;let state={draft:'未发送的草稿'};return{getState:()=>state,setState:value=>(state=value),postMessage(message){
 if(message.type!=='vscodex-layer/request')return;mockRequests.push(message);let result,error;
 if(message.method==='init')result={supported:true,mode:'local',registry:structuredClone(mockRegistry),folders:[{name:'VSCodexLayer',path:'D:/WRK/VSCodexLayer'}],state:mockState,version:'mock'};
@@ -545,6 +545,8 @@ try {
   await evaluate(`mockCannotOpen=false;document.querySelector('[data-vcl-key="new:d:/else/project"]').click()`);
   await waitFor(`new URL(mockRoute,location.origin).searchParams.get('vclProjectCwd')==='D:/Else/Project'`);
   await assertBrowser(`mockThreads.length===beforeProjectThreads&&document.getElementById('native-composer').value===''`, '打开新项目草稿提前创建了聊天');
+  await evaluate(`mockDelayIndex=true;mockHoldView='active';document.querySelector('[aria-label="刷新聊天列表"]').click()`);
+  await waitFor(`mockHeldLists.length===1`);
   for (let index = 3; index <= 5; index += 1) {
     await evaluate(`document.getElementById('native-composer').value='项目独立聊天 ${index}';document.getElementById('native-composer').dispatchEvent(new Event('input'));mockSubmit(true)`);
     await waitFor(`document.querySelector('[data-vcl-key="thread:sent-thread-${index}"]')?.getAttribute('aria-current')==='page'`);
@@ -554,6 +556,16 @@ try {
     }
   }
   await assertBrowser(`JSON.stringify([...document.querySelector('[data-vcl-key="project:d:/else/project"]').closest('.vcl-project').querySelectorAll('.vcl-thread')].map(node=>node.dataset.vclKey))===JSON.stringify(['thread:sent-thread-5','thread:sent-thread-4','thread:sent-thread-3'])`, '新项目连续聊天没有按创建时间从新到旧排列');
+  await assertBrowser(`mockUnindexed.length===3&&!mockThreads.some(thread=>thread.id==='sent-thread-3')`, '创建测试没有模拟后台收录延迟');
+  await evaluate(`mockHeldLists.shift()();mockHoldView=null`);
+  await waitFor(`!document.querySelector('[aria-label="刷新聊天列表"]').disabled`);
+  await assertBrowser(`['3','4','5'].every(id=>document.querySelector('[data-vcl-key="thread:sent-thread-'+id+'"]'))`, '迟到分页抹除了连续新建的聊天');
+  await evaluate(`window.postMessage({type:'vscodex-layer/event',event:{type:'threads-changed',method:'thread/name/updated',threadId:'sent-thread-3',title:'延迟生成的聊天标题'}},location.origin)`);
+  await waitFor(`document.querySelector('[data-vcl-key="thread:sent-thread-3"] .vcl-label').textContent==='延迟生成的聊天标题'`);
+  await assertBrowser(`!mockThreads.some(thread=>thread.id==='sent-thread-3')`, '标题更新检查提前收录了新聊天');
+  await evaluate(`mockUnindexed.find(thread=>thread.id==='sent-thread-3').title='延迟生成的聊天标题';mockThreads.unshift(...mockUnindexed);mockUnindexed=[];mockDelayIndex=false;document.querySelector('[aria-label="刷新聊天列表"]').click()`);
+  await waitFor(`!document.querySelector('[aria-label="刷新聊天列表"]').disabled`);
+  await assertBrowser(`document.querySelector('[data-vcl-key="project:d:/else/project"]').closest('.vcl-project').querySelectorAll('.vcl-thread').length===3`, '后台收录后产生重复聊天');
   for (let index = 3; index <= 5; index += 1) {
     await evaluate(`document.querySelector('[data-vcl-key="thread:sent-thread-${index}"]').click()`);
     await waitFor(`mockRoute==='/local/sent-thread-${index}'`);

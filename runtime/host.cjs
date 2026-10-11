@@ -260,6 +260,7 @@ exports.createLayerHost = function createLayerHost({ vscode, provider, webview, 
     },
     onFatalError(error) { rejectAll(error); },
   }));
+  const threadSources = ['cli', 'vscode', 'appServer'];
   function list(cursor, archived) {
     return new Promise((resolve, reject) => {
       const id = randomUUID();
@@ -272,7 +273,7 @@ exports.createLayerHost = function createLayerHost({ vscode, provider, webview, 
       try {
         provider.codexMcpConnection.sendRequest(name, id, 'thread/list', {
           limit: 50, cursor: cursor ?? null, sortKey: 'updated_at', archived,
-          sourceKinds: ['cli', 'vscode', 'appServer'], useStateDbOnly: true,
+          sourceKinds: threadSources, useStateDbOnly: true,
         });
       } catch (error) { clearTimeout(timer); pending.delete(id); reject(error); }
     });
@@ -409,6 +410,12 @@ exports.createLayerHost = function createLayerHost({ vscode, provider, webview, 
     }
     if (changedMethods.has(notification.method)) post({ type: EVENT, event: {
       type: 'threads-changed', method, ...(validId(threadId) ? { threadId } : {}),
+      ...(method === 'thread/started' && validId(threadId) && params.thread.ephemeral !== true
+        && params.thread.threadSource !== 'mcp_extension_host'
+        && (params.thread.source == null || threadSources.includes(params.thread.source))
+        ? { thread: summary(params.thread) } : {}),
+      ...(method === 'thread/name/updated' && validId(threadId) && typeof params.threadName === 'string'
+        && params.threadName.trim() ? { title: summary({ id: threadId, name: params.threadName.trim() }).title } : {}),
     } });
   }));
   disposables.push(vscode.workspace.onDidChangeWorkspaceFolders(() => post({ type: EVENT, event: 'workspace-changed' })));
