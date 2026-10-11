@@ -4,7 +4,7 @@
 
 ## 命令
 
-在仓库根目录运行，Windows 默认查找当前用户 `.vscode/extensions`；Linux 同时检查 `.vscode-server/extensions` 和 `.vscode/extensions`，支持 `linux-arm64`、`linux-x64` 包。自动查找按当前运行平台、安装清单和过期标记选择插件；多个宿主目录均有候选时拒绝猜测，须用 `--extension "插件绝对路径"` 指定实际运行的目录。自定义 VS Code Server 安装位置也使用此参数。
+在仓库根目录运行，Windows 默认查找当前用户 `.vscode/extensions`；Linux 同时检查 `.vscode-server/extensions` 和 `.vscode/extensions`，支持 `linux-arm64`、`linux-x64` 包。自动查找按当前运行平台、安装清单和过期标记选择插件；仅一处安装时自动选择，多个宿主目录均有候选时，在交互终端列出每处的当前最高版本、用途和完整路径，输入编号选择本次操作的目标。SSH Remote 窗口选择“VS Code Server（Remote SSH）”，直接打开该机桌面 VS Code 时选择“本机桌面 VS Code”；无效编号会提示重选，`q`、回车或输入结束会取消。菜单写入标准错误，不混入标准输出的 JSON。非交互环境不自动选择，须用 `--extension "插件绝对路径"` 指定目录；自定义 VS Code Server 安装位置也使用此参数。选择仅对本次命令生效，不保存默认目标。
 
 ```powershell
 node tools/layer.mjs status
