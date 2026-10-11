@@ -284,7 +284,7 @@ test('归档列表独立分页并限制筛选类型，沿用宿主连接且不�
   for (const archived of ['true', null, 1]) assert.match((await f.request('list', { archived })).error, /筛选参数无效/);
   assert.equal(f.requests.length, 2);
   f.messages.length = 0; f.notify({ method: 'thread/unarchived', params: { threadId: 'saved' } });
-  assert.deepEqual(f.messages, [{ type: 'vscodex-layer/event', event: 'threads-changed' }]);
+  assert.deepEqual(f.messages, [{ type: 'vscodex-layer/event', event: { type: 'threads-changed', method: 'thread/unarchived', threadId: 'saved' } }]);
 });
 
 test('不支持的远程工作区和无效路由被拒绝', async (t) => {
@@ -388,4 +388,17 @@ test('Linux SSH 宿主读取同主机聊天并校验远程目录，错误宿主�
   windows.vscode.env.remoteName = 'ssh-remote';
   windows.vscode.workspace.workspaceFolders = [remoteFolder];
   assert.equal((await windows.request('init')).result.supported, false);
+});
+
+test('活动通知不触发完整列表刷新，归档通知携带目标编号', async (t) => {
+  const f = fixture(); t.after(() => f.host.dispose());
+  for (const method of ['thread/status/changed', 'turn/started', 'turn/completed']) {
+    f.messages.length = 0;
+    f.notify({ method, params: { threadId: 'thread', status: { type: 'active' }, turn: { id: 'turn' } } });
+    await flush();
+    assert.equal(f.messages.some((message) => message.event === 'threads-changed' || message.event?.type === 'threads-changed'), false);
+  }
+  f.messages.length = 0;
+  f.notify({ method: 'thread/archived', params: { threadId: 'thread' } });
+  assert.deepEqual(f.messages[0].event, { type: 'threads-changed', method: 'thread/archived', threadId: 'thread' });
 });

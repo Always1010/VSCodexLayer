@@ -50,7 +50,7 @@ class Navigation {
     this.canonicalState = structuredClone(info.state); this.editBase = structuredClone(info.state);
     this.pendingEdits = []; this.inFlightEdits = [];
     this.threads = []; this.closed = new Set(this.state.groups); this.query = ''; this.active = null;
-    this.view = 'active'; this.revision = 0;
+    this.view = 'active'; this.revision = 0; this.membership = new Map();
     this.archiveView = { threads: [], closed: new Set(), query: '', mode: 'all', revision: 0 };
     this.normalPosition = {}; this.restoring = new Set();
     this.activity = new ThreadActivity(this.state.unread);
@@ -143,7 +143,7 @@ class Navigation {
         if (this.draftProjectCwd !== null) this.newProjectChat(this.draftProjectCwd);
         else this.client.request('new-chat', { path: this.draftPath }).catch((error) => this.showError(error));
       }
-      this.render(); this.persist(); this.invalidateLists();
+      this.render(); this.persist(); this.invalidateLists({ method: 'thread/archived', threadId });
     }));
     this.cleanups.push(this.bridge.subscribeThreadMenuError((message) => {
       this.closeMenuAnchor(); this.showError(new Error(`官方聊天菜单加载失败：${message}`));
@@ -156,7 +156,7 @@ class Navigation {
         }).catch((error) => this.showError(error));
       } else if (event?.type === 'navigation-state-changed') this.applyState(event.state);
       else if (event?.type === 'state-save-error') this.showError(new Error(event.message));
-      else if (event === 'threads-changed') this.invalidateLists();
+      else if (event === 'threads-changed' || event?.type === 'threads-changed') this.invalidateLists(event);
       else if (event?.type === 'projects-changed') this.setRegistry(event);
       else if (this.activity.receive(event)) {
         if (event.threadId === this.active && ['started', 'completed'].includes(event.phase)) this.reader.reset();
@@ -188,7 +188,8 @@ class Navigation {
     const previous = this.view === 'archived' ? this.archiveView : this.normalPosition;
     previous.scrollTop = this.list.scrollTop;
     previous.focused = document.activeElement?.closest('[data-vcl-key]')?.dataset.vclKey ?? previous.focused;
-    clearTimeout(previous.refreshTimer);
+    const previousCache = this.cache(this.view);
+    clearTimeout(previousCache.refreshTimer); previousCache.refreshTimer = null;
     this.projectForm.hidden = true; this.addProjectButton.setAttribute('aria-expanded', 'false');
     this.view = view;
     const archived = view === 'archived', target = this.cache(view);
@@ -209,7 +210,14 @@ class Navigation {
     (focus ?? (archived ? this.archiveBack : this.archiveButton)).focus({ preventScroll: true });
     if (!target.hasLoaded || target.dirty) this.refresh(view);
   }
-  invalidateLists() {
+  invalidateLists(change) {
+    if (typeof change?.threadId === 'string' && ['thread/archived', 'thread/unarchived'].includes(change.method)) {
+      const archived = change.method === 'thread/archived';
+      this.membership.set(change.threadId, archived);
+      const opposite = this.cache(archived ? 'active' : 'archived');
+      opposite.threads = opposite.threads.filter((thread) => thread.id !== change.threadId);
+      this.render();
+    }
     for (const view of ['active', 'archived']) {
       const target = this.cache(view); target.revision += 1; target.dirty = true;
       if (view === this.view || target.hasLoaded) this.scheduleRefresh(view);
@@ -232,7 +240,7 @@ class Navigation {
       if (this.disposed) return;
       if (result?.restored !== true) throw new Error('官方恢复操作未确认成功，请刷新归档列表后重试。');
       this.archiveView.threads = this.archiveView.threads.filter((item) => item.id !== thread.id);
-      this.invalidateLists();
+      this.invalidateLists({ method: 'thread/unarchived', threadId: thread.id });
       const viewFailed = viewAfter && result.openable !== false && !await this.viewRestoredThread(thread);
       if (this.disposed) return;
       this.notifyProject(result.openable === false ? '聊天已取消归档，但原生聊天加载失败；可刷新项目聊天后重试。'
@@ -422,7 +430,7 @@ class Navigation {
     if (this.disposed) return;
     const target = this.cache(view);
     if (target.loading) { target.refreshAgain = true; return; }
-    clearTimeout(target.refreshTimer);
+    clearTimeout(target.refreshTimer); target.refreshTimer = null;
     target.loading = true; target.error = null;
     const revision = target.revision;
     if (this.view === view) { this.status.classList.remove('vcl-error'); this.render(); }
@@ -434,11 +442,14 @@ class Navigation {
         },
       });
       if (this.disposed) return;
-      if (revision !== target.revision) { target.refreshAgain = true; return; }
+      const changed = revision !== target.revision;
+      if (changed) target.refreshAgain = true;
       const firstLoad = !target.hasLoaded;
       const knownActive = target.threads.some((thread) => thread.id === this.active);
-      target.threads = threads; target.hasLoaded = true; target.dirty = false;
-      const active = threads.find((thread) => thread.id === this.active);
+      target.threads = threads.filter((thread) => !this.membership.has(thread.id)
+        || this.membership.get(thread.id) === (view === 'archived'));
+      target.hasLoaded = true; target.dirty = changed;
+      const active = target.threads.find((thread) => thread.id === this.active);
       if (view === 'active' && (firstLoad || !knownActive) && active) this.closed.delete(normalizePath(active.cwd));
       if (this.view === view) { this.status.textContent = ''; this.render(); }
     } catch (error) {
@@ -457,7 +468,8 @@ class Navigation {
     if (this.disposed) return;
     const target = this.cache(view);
     if (view === 'archived' && this.view !== view) { target.dirty = true; return; }
-    clearTimeout(target.refreshTimer); target.refreshTimer = setTimeout(() => this.refresh(view), 600);
+    if (target.loading) { target.refreshAgain = true; return; }
+    if (!target.refreshTimer) target.refreshTimer = setTimeout(() => this.refresh(view), 600);
   }
   showError(error) {
     if (this.disposed) return;
