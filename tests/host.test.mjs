@@ -35,6 +35,44 @@ function fixture(platform = process.platform, globalState) {
 }
 const flush = () => new Promise((resolve) => setImmediate(resolve));
 
+test('多面板按操作保存偏好，已读绑定轮次，重复结束不复活且写入失败可重试', async (t) => {
+  const values = new Map([['vscodexLayer.navigationState.v1', { pinnedProjects: [{ path: '/legacy', name: '旧置顶' }], unread: ['legacy'] }]]);
+  let fail = false;
+  const store = { get: (key) => values.get(key), async update(key, value) {
+    await flush(); if (fail) throw new Error('保存失败'); values.set(key, value);
+  } };
+  const a = fixture(process.platform, store), b = fixture(process.platform, store);
+  t.after(() => { a.host.dispose(); b.host.dispose(); });
+  await a.request('init'); await b.request('init');
+  await Promise.all([
+    a.request('save-state', { operations: [{ type: 'pin', project: { path: '/A', name: 'A' }, enabled: true }] }),
+    b.request('save-state', { operations: [{ type: 'set', key: 'width', value: 310 }, { type: 'pin', project: { path: '/B' }, enabled: true }] }),
+  ]);
+  let state = (await a.request('init')).result.state;
+  assert.deepEqual(state.pinnedProjects.map((project) => project.path), ['/legacy', '/A', '/B']);
+  assert.equal(state.width, 310); assert.deepEqual(state.unread, ['legacy']);
+  const completed = { method: 'turn/completed', params: { threadId: 'thread', turn: { id: 'turn-1', status: 'completed' } } };
+  a.notify(completed); b.notify(completed);
+  state = (await a.request('init')).result.state;
+  assert.ok(state.unread.includes('thread'));
+  await b.request('save-state', { operations: [{ type: 'acknowledge', threadId: 'thread', turnToken: 'turn-1' }] });
+  a.notify(completed);
+  assert.equal((await a.request('init')).result.state.unread.includes('thread'), false);
+  a.notify({ method: 'turn/started', params: { threadId: 'thread', turn: { id: 'turn-2' } } });
+  a.notify({ method: 'turn/completed', params: { threadId: 'thread', turn: { id: 'turn-2' } } });
+  await b.request('save-state', { operations: [{ type: 'acknowledge', threadId: 'thread', turnToken: 'turn-1' }] });
+  assert.ok((await a.request('init')).result.state.unread.includes('thread'), '旧已读不能清除新轮次');
+  a.notify(completed);
+  assert.equal((await a.request('init')).result.state.unreadTurns.thread, 'turn-2', '迟到结束不能替换新轮次');
+  await b.request('save-state', { operations: [{ type: 'acknowledge', threadId: 'legacy', turnToken: null }] });
+  fail = true;
+  assert.match((await a.request('save-state', { operations: [{ type: 'set', key: 'mode', value: 'current' }] })).error, /保存失败/);
+  fail = false;
+  assert.ok((await b.request('save-state', { operations: [{ type: 'set', key: 'mode', value: 'current' }] })).result.saved);
+  assert.equal((await a.request('init')).result.state.mode, 'current');
+  assert.ok(b.messages.some((message) => message.event?.type === 'navigation-state-changed'));
+});
+
 test('手动项目独立持久化，多个面板并发不丢记录，失败可恢复且失效目录可移除', async (t) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'vcl-projects-'));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
@@ -56,7 +94,7 @@ test('手动项目独立持久化，多个面板并发不丢记录，失败可�
   assert.equal(second.messages.filter((message) => message.event?.type === 'projects-changed').length, 2);
   const duplicate = await first.request('add-project', { cwd: `${directories[0]}${path.sep}.` });
   assert.equal(duplicate.result.changed, false); assert.equal(duplicate.result.revision, 2);
-  await second.request('save-state', { state: { mode: 'current', width: 310 } });
+  await second.request('save-state', { operations: [{ type: 'set', key: 'mode', value: 'current' }, { type: 'set', key: 'width', value: 310 }] });
   assert.deepEqual((await first.request('init')).result.registry, registry, '导航偏好保存不得覆盖项目登记');
   failWrite = true;
   assert.match((await first.request('add-project', { cwd: directories[2] })).error, /保存失败/);
@@ -98,8 +136,8 @@ test('项目置顶偏好保存并过滤无效目录，旧偏好正常读取', as
   const f = fixture(); t.after(() => f.host.dispose());
   assert.deepEqual((await f.request('init')).result.state.pinnedProjects, []);
   const pinnedProjects = [{ path: '/home/Project', name: 'Project' }, { path: 'D:\\Other\\Project', name: '同名目录' }];
-  await f.request('save-state', { state: { pinnedProjects: [...pinnedProjects,
-    { path: '/home/Project', name: '重复' }, { path: 'relative', name: '无效' }, { path: '/a\0b' }, null] } });
+  await f.request('save-state', { operations: [...pinnedProjects, { path: '/home/Project', name: '重复' },
+    { path: 'relative', name: '无效' }, { path: '/a\0b' }, null].map((project) => ({ type: 'pin', project, enabled: true })) });
   assert.deepEqual((await f.request('init')).result.state.pinnedProjects, pinnedProjects);
 });
 
@@ -172,11 +210,12 @@ test('审批和输入状态保留，结束事件只转发导航所需字段', as
       items: [{ type: 'agentMessage', id: 'reply', phase: 'final_answer', text: 'secret' }] } },
       { phase: 'completed', status: 'idle', activeFlags: [], replyItemId: 'reply' }],
   ]) {
-    f.messages.length = 0; f.notify({ method, params });
-    assert.deepEqual(f.messages, [
-      { type: 'vscodex-layer/event', event: { type: 'thread-activity', threadId: 'one', ...expected } },
-      { type: 'vscodex-layer/event', event: 'threads-changed' },
-    ]);
+    f.messages.length = 0; f.notify({ method, params }); await flush();
+    const activity = f.messages.find((message) => message.event?.type === 'thread-activity').event;
+    const { turnToken, unread, ...publicEvent } = activity;
+    assert.deepEqual(publicEvent, { type: 'thread-activity', threadId: 'one', ...expected });
+    if (expected.phase !== 'status') assert.equal(typeof turnToken, 'string');
+    assert.equal(JSON.stringify(f.messages).includes('secret'), false, '通知与状态广播不得泄漏正文');
   }
   f.messages.length = 0;
   f.notify({ method: 'item/completed', params: { threadId: 'one', turnId: 'next',
@@ -185,16 +224,19 @@ test('审批和输入状态保留，结束事件只转发导航所需字段', as
     item: { type: 'agentMessage', id: 'commentary', phase: 'commentary', text: 'secret' } } });
   assert.deepEqual(f.messages, [], '回复正文和中间进度不得转发给导航');
   f.notify({ method: 'turn/completed', params: { threadId: 'one', turn: { id: 'next', status: 'completed', items: [] } } });
-  assert.equal(f.messages[0].event.replyItemId, 'last-reply', '结束通知没有 items 时沿用同轮次的已完成回复编号');
+  await flush();
+  assert.equal(f.messages.find((message) => message.event?.type === 'thread-activity').event.replyItemId, 'last-reply', '结束通知没有 items 时沿用同轮次的已完成回复编号');
   f.messages.length = 0;
   f.notify({ method: 'item/completed', params: { threadId: 'one', turnId: 'old',
     item: { type: 'agentMessage', id: 'old-reply', phase: 'final_answer' } } });
   f.notify({ method: 'turn/completed', params: { threadId: 'one', turn: { id: 'new', status: 'completed' } } });
-  assert.equal(f.messages[0].event.replyItemId, undefined, '不能关联其他轮次的回复');
+  await flush();
+  assert.equal(f.messages.find((message) => message.event?.type === 'thread-activity').event.replyItemId, undefined, '不能关联其他轮次的回复');
   const state = (await f.request('init')).result.state;
-  assert.deepEqual(state.unread, []);
-  await f.request('save-state', { state: { unread: ['one', '../invalid', null, 'x'.repeat(201)] } });
-  assert.deepEqual((await f.request('init')).result.state.unread, ['one']);
+  assert.deepEqual(state.unread, ['one']);
+  await f.request('save-state', { operations: [{ type: 'acknowledge', threadId: 'one', turnToken: state.unreadTurns.one }] });
+  assert.deepEqual((await f.request('init')).result.state.unread, []);
+  assert.match((await f.request('save-state', { operations: [{ type: 'acknowledge', threadId: '../invalid' }] })).error, /无效/);
   f.messages.length = 0;
   f.notify({ method: 'thread/status/changed', params: { threadId: '../invalid' } });
   assert.equal(f.messages.some((message) => typeof message.event === 'object'), false);

@@ -75,7 +75,7 @@ export class ReplyReader {
       this.timer = null;
       if (this.intent === intent && this.visibleReply() === reply
         && this.activity.acknowledgeReply(intent.threadId, intent.completion)) {
-        this.reset(); this.onRead();
+        this.reset(); this.onRead(intent.threadId, intent.completion);
       }
     }, 300);
   }

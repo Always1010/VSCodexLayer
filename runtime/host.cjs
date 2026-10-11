@@ -9,6 +9,8 @@ const EVENT = 'vscodex-layer/event';
 const STATE_KEY = 'vscodexLayer.navigationState.v1';
 const PROJECTS_KEY = 'vscodexLayer.projects.v1';
 const projectStores = new WeakMap();
+const navigationStores = new WeakMap();
+const validId = (value) => typeof value === 'string' && /^[\w-]{1,200}$/.test(value);
 
 function directoryKey(directory) {
   const resolved = path.resolve(directory);
@@ -29,6 +31,7 @@ function cleanProjects(value = {}) {
 }
 
 function cleanState(value = {}) {
+  value ??= {};
   const pins = new Map();
   for (const project of Array.isArray(value.pinnedProjects) ? value.pinnedProjects : []) {
     const directory = project?.path;
@@ -39,6 +42,8 @@ function cleanState(value = {}) {
     if (pins.size === 2000) break;
   }
   return {
+    revision: Number.isSafeInteger(value.revision) && value.revision >= 0 ? value.revision : 0,
+    unreadTurns: Object.fromEntries(Object.entries(value.unreadTurns ?? {}).filter(([id, token]) => validId(id) && validId(token)).slice(-2000)),
     mode: value.mode === 'current' ? 'current' : 'all',
     width: Math.min(420, Math.max(180, Number(value.width) || 250)),
     collapsed: typeof value.collapsed === 'boolean' ? value.collapsed : null,
@@ -167,6 +172,68 @@ exports.createLayerHost = function createLayerHost({ vscode, provider, webview, 
     projectStore.queue = operation.catch(() => {});
     return operation;
   }
+  let navigationStore = navigationStores.get(provider.globalState);
+  if (!navigationStore) {
+    navigationStore = { queue: Promise.resolve(), listeners: new Set(), turns: new Map(), tokens: new WeakMap() };
+    navigationStores.set(provider.globalState, navigationStore);
+  }
+  const stateChanged = (state) => post({ type: EVENT, event: { type: 'navigation-state-changed', state } });
+  navigationStore.listeners.add(stateChanged);
+  disposables.push({ dispose() { navigationStore.listeners.delete(stateChanged); } });
+  async function readState() {
+    await navigationStore.queue;
+    return cleanState(await provider.globalState.get(STATE_KEY));
+  }
+  function changeState(operations, internal = false) {
+    if (!Array.isArray(operations) || !operations.length || operations.length > 2000) {
+      return Promise.reject(new Error('导航状态操作无效。'));
+    }
+    const operation = navigationStore.queue.then(async () => {
+      if (disposed) throw new Error('聊天面板已关闭。');
+      let state = cleanState(await provider.globalState.get(STATE_KEY));
+      const turns = new Map(navigationStore.turns);
+      for (const edit of operations) {
+        if (edit?.type === 'set' && ['mode', 'width', 'collapsed', 'disabled'].includes(edit.key)) {
+          state = cleanState({ ...state, [edit.key]: edit.value });
+        } else if (edit?.type === 'pin' && typeof edit.enabled === 'boolean') {
+          const project = cleanState({ pinnedProjects: [edit.project] }).pinnedProjects[0];
+          if (!project) continue;
+          const key = directoryKey(project.path);
+          const index = state.pinnedProjects.findIndex((item) => directoryKey(item.path) === key);
+          if (edit.enabled && index < 0) state.pinnedProjects.push(project);
+          if (!edit.enabled && index >= 0) state.pinnedProjects.splice(index, 1);
+        } else if (edit?.type === 'group' && typeof edit.key === 'string' && edit.key.length <= 4096 && typeof edit.closed === 'boolean') {
+          const groups = new Set(state.groups);
+          if (edit.closed) groups.add(edit.key); else groups.delete(edit.key);
+          state.groups = [...groups];
+        } else if (edit?.type === 'acknowledge' && validId(edit.threadId)) {
+          if ((state.unreadTurns[edit.threadId] ?? null) === (edit.turnToken ?? null)) {
+            state.unread = state.unread.filter((id) => id !== edit.threadId);
+          }
+        } else if (internal && edit?.type === 'turn' && validId(edit.threadId) && validId(edit.turnToken)) {
+          const previous = turns.get(edit.threadId);
+          if (previous?.seen.includes(edit.turnToken) || previous?.token === edit.turnToken && (previous.phase === edit.phase || previous.phase === 'completed')) continue;
+          const seen = previous && previous.token !== edit.turnToken ? [...previous.seen, previous.token].slice(-8) : previous?.seen ?? [];
+          turns.set(edit.threadId, { token: edit.turnToken, phase: edit.phase, seen });
+          // Keep the latest token after acknowledgement so duplicate completions cannot resurrect unread.
+          const duplicate = edit.phase === 'completed' && state.unreadTurns[edit.threadId] === edit.turnToken
+            && previous?.phase !== 'started';
+          const wasUnread = state.unread.includes(edit.threadId);
+          state.unreadTurns[edit.threadId] = edit.turnToken;
+          state.unread = state.unread.filter((id) => id !== edit.threadId);
+          if (edit.phase === 'completed' && !duplicate) state.unread.push(edit.threadId);
+          else if (duplicate && wasUnread) state.unread.push(edit.threadId);
+        } else throw new Error('导航状态操作无效。');
+      }
+      state = cleanState(state); state.revision += 1;
+      await provider.globalState.update(STATE_KEY, state);
+      navigationStore.turns = new Map([...turns].slice(-2000));
+      for (const listener of navigationStore.listeners) listener(state);
+      return { saved: true, state };
+    });
+    navigationStore.queue = operation.catch(() => {});
+    return operation;
+  }
   const folders = () => (vscode.workspace.workspaceFolders ?? []).map((folder) => ({
     name: folder.name, path: folder.uri.fsPath, scheme: folder.uri.scheme, authority: folder.uri.authority,
   }));
@@ -224,7 +291,7 @@ exports.createLayerHost = function createLayerHost({ vscode, provider, webview, 
   }
   async function run(method, params) {
     if (method === 'init') return { ...support(), folders: folders(),
-      state: cleanState(await provider.globalState.get(STATE_KEY)), registry: await readProjects(), version: provider.extensionVersion };
+      state: await readState(), registry: await readProjects(), version: provider.extensionVersion };
     const environment = support();
     if (!environment.supported) throw new Error(environment.reason);
     if (method === 'open-reasoning-view') return openReader(params);
@@ -284,8 +351,7 @@ exports.createLayerHost = function createLayerHost({ vscode, provider, webview, 
       return { path: route, cwd };
     }
     if (method === 'save-state') {
-      await provider.globalState.update(STATE_KEY, cleanState(params.state));
-      return { saved: true };
+      return changeState(params.operations);
     }
     throw new Error('不支持的增强操作。');
   }
@@ -318,7 +384,25 @@ exports.createLayerHost = function createLayerHost({ vscode, provider, webview, 
           replies.delete(threadId);
         }
       }
-      if (event) post({ type: EVENT, event });
+      if (event?.phase === 'started' || event?.phase === 'completed') {
+        let turnToken = params.turn?.id ?? params.turnId;
+        if (!validId(turnToken)) {
+          turnToken = navigationStore.tokens.get(notification);
+          if (!turnToken) {
+            turnToken = event.phase === 'completed' ? navigationStore.turns.get(threadId)?.token : null;
+            turnToken ??= randomUUID(); navigationStore.tokens.set(notification, turnToken);
+          }
+        }
+        const activityEvent = { ...event, turnToken };
+        changeState([{ type: 'turn', threadId, turnToken, phase: event.phase }], true).then(({ state }) => {
+          if (state.unreadTurns[threadId] === turnToken) post({ type: EVENT, event: {
+            ...activityEvent, unread: state.unread.includes(threadId),
+          } });
+        }).catch((error) => {
+          post({ type: EVENT, event: activityEvent });
+          post({ type: EVENT, event: { type: 'state-save-error', message: error.message } });
+        });
+      } else if (event) post({ type: EVENT, event });
     }
     if (changedMethods.has(notification.method)) post({ type: EVENT, event: 'threads-changed' });
   }));
