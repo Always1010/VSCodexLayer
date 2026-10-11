@@ -356,7 +356,7 @@ exports.createLayerHost = function createLayerHost({ vscode, provider, webview, 
     throw new Error('不支持的增强操作。');
   }
   const changedMethods = new Set(['thread/started', 'thread/name/updated', 'thread/archived', 'thread/unarchived',
-    'thread/status/changed', 'thread/metadata/updated', 'turn/started', 'turn/completed']);
+    'thread/metadata/updated']);
   const replies = new Map();
   const replyId = (item) => item?.type === 'agentMessage' && item.phase !== 'commentary'
     && typeof item.id === 'string' && /^[\w-]{1,200}$/.test(item.id) ? item.id : null;
@@ -404,7 +404,9 @@ exports.createLayerHost = function createLayerHost({ vscode, provider, webview, 
         });
       } else if (event) post({ type: EVENT, event });
     }
-    if (changedMethods.has(notification.method)) post({ type: EVENT, event: 'threads-changed' });
+    if (changedMethods.has(notification.method)) post({ type: EVENT, event: {
+      type: 'threads-changed', method, ...(validId(threadId) ? { threadId } : {}),
+    } });
   }));
   disposables.push(vscode.workspace.onDidChangeWorkspaceFolders(() => post({ type: EVENT, event: 'workspace-changed' })));
   const api = {

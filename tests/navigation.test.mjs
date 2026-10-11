@@ -283,3 +283,34 @@ test('停用取消延迟保存，等待已有写入，重复点击及失败重�
   fail = false; await retry.disable();
   assert.equal(remote.width, 330); assert.equal(remote.disabled, true); assert.equal(retry.disposed, true);
 });
+
+test('分页期间通知不丢弃有效结果，归档恢复过滤迟到条目且刷新合并', async () => {
+  const requests = []; const timers = new Map(); let timerId = 0;
+  const nav = await navigationFixture({ request(method, params) {
+    assert.equal(method, 'list');
+    return new Promise(resolve => requests.push({ params, resolve }));
+  } }, { setTimeout(callback) { const id = ++timerId; timers.set(id, callback); return id; }, clearTimeout(id) { timers.delete(id); } });
+  nav.status = { classList: { remove() {} } }; nav.showError = () => {};
+  const reading = nav.refresh('active');
+  nav.invalidateLists(); nav.invalidateLists();
+  requests[0].resolve({ data: [{ id: 'keep' }, { id: 'archived' }], nextCursor: 'page-2' });
+  await new Promise(resolve => setImmediate(resolve));
+  nav.invalidateLists({ method: 'thread/archived', threadId: 'archived' });
+  requests[1].resolve({ data: [{ id: 'later' }], nextCursor: null });
+  await reading;
+  assert.deepEqual(nav.threads.map(thread => thread.id), ['keep', 'later']);
+  assert.equal(nav.hasLoaded, true); assert.equal(timers.size, 1, '多次通知仅安排一次后续读取');
+  nav.invalidateLists(); nav.invalidateLists();
+  assert.equal(timers.size, 1, '持续通知不能推迟已安排的刷新');
+  const errorRefresh = nav.refresh('active');
+  requests[2].resolve({ error: true }); await errorRefresh;
+  assert.deepEqual(nav.threads.map(thread => thread.id), ['keep', 'later']);
+  assert.equal(timers.size, 0, '无新通知的失败不自动循环重试');
+  nav.view = 'archived';
+  const archivedReading = nav.refresh('archived');
+  nav.invalidateLists({ method: 'thread/unarchived', threadId: 'restored' });
+  requests[3].resolve({ data: [{ id: 'restored' }, { id: 'still-archived' }], nextCursor: null });
+  await archivedReading;
+  assert.deepEqual(nav.archiveView.threads.map(thread => thread.id), ['still-archived']);
+  assert.deepEqual(nav.threads.map(thread => thread.id), ['keep', 'later'], '归档响应不能覆盖普通视图');
+});
