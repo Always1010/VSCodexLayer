@@ -71,6 +71,22 @@ test('多面板按操作保存偏好，已读绑定轮次，重复结束不复�
   assert.ok((await b.request('save-state', { operations: [{ type: 'set', key: 'mode', value: 'current' }] })).result.saved);
   assert.equal((await a.request('init')).result.state.mode, 'current');
   assert.ok(b.messages.some((message) => message.event?.type === 'navigation-state-changed'));
+  a.notify({ method: 'turn/started', params: { threadId: 'thread', turn: { id: 'turn-after-restart' } } });
+  await a.request('init');
+  // A new Memento wrapper represents a fresh extension process with persisted state only.
+  const restarted = fixture(process.platform, { get: store.get, update: store.update });
+  t.after(() => restarted.host.dispose());
+  const ending = { method: 'turn/completed', params: { threadId: 'thread', turn: { id: 'turn-after-restart' } } };
+  restarted.notify(ending);
+  assert.ok((await restarted.request('init')).result.state.unread.includes('thread'), '宿主重启后的首次结束必须标为未读');
+  restarted.notify({ method: 'turn/started', params: ending.params });
+  assert.ok((await restarted.request('init')).result.state.unread.includes('thread'), '迟到开始不能撤销同轮次结束');
+  assert.equal(restarted.messages.some((message) => message.event?.phase === 'started'), false);
+  await restarted.request('save-state', { operations: [{ type: 'acknowledge', threadId: 'thread', turnToken: 'turn-after-restart' }] });
+  const reopened = fixture(process.platform, { get: store.get, update: store.update });
+  t.after(() => reopened.host.dispose());
+  reopened.notify(ending);
+  assert.equal((await reopened.request('init')).result.state.unread.includes('thread'), false, '重启后重复结束也不能复活已读');
 });
 
 test('手动项目独立持久化，多个面板并发不丢记录，失败可恢复且失效目录可移除', async (t) => {

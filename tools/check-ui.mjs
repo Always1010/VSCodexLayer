@@ -67,13 +67,15 @@ import {overlayNavigationEdits} from '/webview/core.mjs';
 window.mockApplyOperations=overlayNavigationEdits;
 let mockTurnSequence=0;
 window.addEventListener('message',message=>{
- const event=message.data?.event;if(event?.type!=='thread-activity'||!['started','completed'].includes(event.phase))return;
+ const event=message.data?.event;if(event?.type!=='thread-activity'||event.__mockCanonical||!['started','completed'].includes(event.phase))return;
+ message.stopImmediatePropagation();
  event.turnToken=event.turnToken??(event.phase==='started'?'mock-turn-'+(++mockTurnSequence):mockState.unreadTurns[event.threadId]??'mock-turn-'+(++mockTurnSequence));
  mockState.unreadTurns[event.threadId]=event.turnToken;
  mockState.unread=mockState.unread.filter(id=>id!==event.threadId);
  if(event.phase==='completed')mockState.unread.push(event.threadId);
  event.unread=event.phase==='completed';mockState.revision++;
  window.postMessage({type:'vscodex-layer/event',event:{type:'navigation-state-changed',state:structuredClone(mockState)}},location.origin);
+ window.postMessage({type:'vscodex-layer/event',event:{...event,__mockCanonical:true}},location.origin);
 });
 window.nativeRoot=document.getElementById('root');window.nativeApi=acquireVsCodeApi();mockNavigate('/');nativeApi.postMessage({type:'ready'});
 window.mockActionCalls=[];window.mockArchiveFailure=false;
@@ -284,7 +286,7 @@ try {
       window.activityEvent=(phase='completed',replyItemId='reply',status='idle',activeFlags=[])=>window.postMessage({type:'vscodex-layer/event',event:{type:'thread-activity',threadId:'thread-0',phase,replyItemId,status,activeFlags}},location.origin)`);
     const blue = `!!document.querySelector('[data-vcl-key="thread:thread-0"] .vcl-attention')`;
     const complete = async (item = 'reply', status = 'idle', flags = []) => {
-      await evaluate(`activityEvent('completed',${JSON.stringify(item)},${JSON.stringify(status)},${JSON.stringify(flags)})`);
+      await evaluate(`activityEvent('started',${JSON.stringify(item)},'active');activityEvent('completed',${JSON.stringify(item)},${JSON.stringify(status)},${JSON.stringify(flags)})`);
       await waitFor(blue);
     };
     const settle = () => evaluate('new Promise(resolve=>setTimeout(resolve,400))');
