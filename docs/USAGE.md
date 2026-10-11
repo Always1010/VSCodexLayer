@@ -4,7 +4,7 @@
 
 ## 命令
 
-在仓库根目录运行，默认查找当前用户 `.vscode/extensions` 下已适配的官方插件；也可用 `--extension "插件绝对路径"` 指定目录。
+在仓库根目录运行，Windows 默认查找当前用户 `.vscode/extensions`；Linux 同时检查 `.vscode-server/extensions` 和 `.vscode/extensions`，支持 `linux-arm64`、`linux-x64` 包。自动查找按当前运行平台、安装清单和过期标记选择插件；多个宿主目录均有候选时拒绝猜测，须用 `--extension "插件绝对路径"` 指定实际运行的目录。自定义 VS Code Server 安装位置也使用此参数。
 
 ```powershell
 node tools/layer.mjs status

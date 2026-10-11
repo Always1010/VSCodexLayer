@@ -6,8 +6,8 @@ import path from 'node:path';
 import { probeCompatibility } from '../lib/compatibility.mjs';
 import { findInstalledExtension } from '../lib/extension-discovery.mjs';
 
-async function extension(parent, version, files = {}) {
-  const root = path.join(parent, `openai.chatgpt-${version}-win32-x64`);
+async function extension(parent, version, files = {}, platform = 'win32-x64') {
+  const root = path.join(parent, `openai.chatgpt-${version}-${platform}`);
   await fs.mkdir(path.join(root, 'out'), { recursive: true });
   await fs.mkdir(path.join(root, 'webview', 'assets'), { recursive: true });
   await fs.writeFile(path.join(root, 'package.json'), JSON.stringify({ name: 'chatgpt', publisher: 'openai', version }));
@@ -29,10 +29,34 @@ test('发现当前未过期的最高版本而不选择残留目录', async (t) =
     'openai.chatgpt-26.5930.51102': true,
     'openai.chatgpt-26.6000.10000': true,
   }));
-  const result = await findInstalledExtension(parent);
+  const result = await findInstalledExtension(parent, { platform: 'win32-x64' });
   assert.equal(result.root, current);
   assert.equal(result.version, '26.51002.51308');
   assert.equal(result.candidates.length, 3);
+});
+
+test('ARM64 发现遵循安装清单、平台和过期标记，多个宿主拒绝猜测', async (t) => {
+  const home = await fs.mkdtemp(path.join(os.tmpdir(), 'vscodex-arm64-'));
+  t.after(() => fs.rm(home, { recursive: true, force: true }));
+  const remote = path.join(home, '.vscode-server', 'extensions');
+  const current = await extension(remote, '26.51007.21434', {}, 'linux-arm64');
+  await extension(remote, '99.1.0', {}, 'linux-arm64');
+  await extension(remote, '99.2.0', {}, 'win32-x64');
+  const old = await extension(remote, '99.3.0', {}, 'linux-arm64');
+  const record = (root, version) => ({ identifier: { id: 'openai.chatgpt' }, version,
+    relativeLocation: path.basename(root), metadata: { targetPlatform: 'linux-arm64' } });
+  await fs.writeFile(path.join(remote, 'extensions.json'), JSON.stringify([
+    record(current, '26.51007.21434'), record(old, '99.3.0'),
+  ]));
+  await fs.writeFile(path.join(remote, '.obsolete'), JSON.stringify({ [path.basename(old)]: true }));
+  const options = { home, platform: 'linux-arm64' };
+  assert.equal((await findInstalledExtension(undefined, options)).root, current);
+  const local = path.join(home, '.vscode', 'extensions');
+  await extension(local, '26.51007.21434', {}, 'linux-arm64');
+  await assert.rejects(findInstalledExtension(undefined, options), /无法确定当前宿主/);
+  assert.equal((await findInstalledExtension(remote, options)).root, current);
+  await fs.writeFile(path.join(remote, 'extensions.json'), '[]');
+  await assert.rejects(findInstalledExtension(remote, options), /未找到/);
 });
 
 test('只读探测报告动态入口和语义候选文件', async (t) => {
