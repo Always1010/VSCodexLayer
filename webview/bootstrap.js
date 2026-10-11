@@ -7,6 +7,7 @@
   const menuSubscribers = new Set();
   const menuSurfaces = new Set();
   const archiveSubscribers = new Set();
+  const archiveActions = new Map();
   const menuErrorSubscribers = new Set();
   let menuTarget = null;
   let menuSequence = 0;
@@ -85,6 +86,19 @@
     subscribeThreadArchived(callback) { archiveSubscribers.add(callback); return () => archiveSubscribers.delete(callback); },
     threadArchived(threadId) {
       for (const callback of archiveSubscribers) { try { callback(threadId); } catch { /* Keep native success handling intact. */ } }
+    },
+    registerArchiveActions(surface, actions) {
+      archiveActions.set(surface, actions);
+      return () => archiveActions.delete(surface);
+    },
+    restoreArchivedThread(thread) {
+      if (!thread || typeof thread.id !== 'string' || !/^[\w-]{1,200}$/.test(thread.id)) {
+        return Promise.reject(new Error('聊天编号无效。'));
+      }
+      const actions = archiveActions.values().next().value;
+      if (!actions) return Promise.reject(new Error('官方恢复操作尚未就绪，请稍后重试。'));
+      const target = { id: thread.id };
+      return Promise.resolve().then(() => actions.restore(target));
     },
     reasoningEnabled() { return reasoningEnabled; },
     subscribeReasoning(callback) {

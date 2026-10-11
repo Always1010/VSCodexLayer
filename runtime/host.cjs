@@ -191,7 +191,7 @@ exports.createLayerHost = function createLayerHost({ vscode, provider, webview, 
     },
     onFatalError(error) { rejectAll(error); },
   }));
-  function list(cursor) {
+  function list(cursor, archived) {
     return new Promise((resolve, reject) => {
       const id = randomUUID();
       const timer = setTimeout(() => {
@@ -202,7 +202,7 @@ exports.createLayerHost = function createLayerHost({ vscode, provider, webview, 
       pending.set(id, { resolve, reject, timer });
       try {
         provider.codexMcpConnection.sendRequest(name, id, 'thread/list', {
-          limit: 50, cursor: cursor ?? null, sortKey: 'updated_at', archived: false,
+          limit: 50, cursor: cursor ?? null, sortKey: 'updated_at', archived,
           sourceKinds: ['cli', 'vscode', 'appServer'], useStateDbOnly: true,
         });
       } catch (error) { clearTimeout(timer); pending.delete(id); reject(error); }
@@ -239,7 +239,8 @@ exports.createLayerHost = function createLayerHost({ vscode, provider, webview, 
     }
     if (method === 'list') {
       if (params.cursor != null && (typeof params.cursor !== 'string' || params.cursor.length > 16384)) throw new Error('分页参数无效。');
-      const result = await list(params.cursor);
+      if (params.archived !== undefined && typeof params.archived !== 'boolean') throw new Error('归档筛选参数无效。');
+      const result = await list(params.cursor, params.archived === true);
       if (!Array.isArray(result?.data)) throw new Error('官方聊天列表格式发生变化。');
       return { data: result.data.map(summary).filter(Boolean), nextCursor: result.nextCursor ?? null };
     }

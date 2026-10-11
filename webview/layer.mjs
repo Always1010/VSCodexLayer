@@ -13,6 +13,9 @@ const icons = {
   pin: ['M16 3l5 5-4 1-4 4-1 4-5-5 4-1 4-4Z', 'm2 22 5-5'],
   more: ['M5 12h.01', 'M12 12h.01', 'M19 12h.01'],
   folderPlus: ['M3 7V5a2 2 0 0 1 2-2h5l2 3h7a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z', 'M12 10v8', 'M8 14h8'],
+  archive: ['M3 3h18v4H3Z', 'M5 7v14h14V7', 'M10 11h4'],
+  restore: ['M3 10h5V5', 'M3 10a9 9 0 1 1 1 8', 'M12 7v5l3 2'],
+  open: ['M15 3h6v6', 'm10 14 11-11', 'M21 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h6'],
 };
 
 function element(tag, className, text) {
@@ -45,6 +48,9 @@ class Navigation {
   constructor(client, bridge, info) {
     this.client = client; this.bridge = bridge; this.info = info; this.state = info.state;
     this.threads = []; this.closed = new Set(this.state.groups); this.query = ''; this.active = null;
+    this.view = 'active'; this.revision = 0;
+    this.archiveView = { threads: [], closed: new Set(), query: '', mode: 'all', revision: 0 };
+    this.normalPosition = {}; this.restoring = new Set();
     this.activity = new ThreadActivity(this.state.unread);
     this.draftPath = '/';
     this.projectCwd = null; this.draftProjectCwd = null;
@@ -54,7 +60,10 @@ class Navigation {
   mount() {
     this.rail = element('aside'); this.rail.id = 'vcl-navigation'; this.rail.setAttribute('aria-label', '项目聊天导航');
     const header = element('div', 'vcl-header');
-    header.append(element('strong', 'vcl-heading', '项目聊天'));
+    this.archiveBack = iconButton('back', '返回项目聊天', () => this.setView('active'));
+    this.archiveBack.id = 'vcl-archive-back'; this.archiveBack.hidden = true;
+    this.heading = element('strong', 'vcl-heading', '项目聊天');
+    header.append(this.archiveBack, this.heading);
     this.refreshButton = iconButton('refresh', '刷新聊天列表', () => this.refresh());
     const toggle = iconButton('panel', '收起或展开项目导航 (Alt+/)', () => this.toggleNavigation());
     toggle.setAttribute('aria-keyshortcuts', 'Alt+/');
@@ -66,11 +75,19 @@ class Navigation {
       const option = element('option', '', label); option.value = value; this.mode.append(option);
     }
     this.mode.value = this.state.mode;
-    this.mode.addEventListener('change', () => { this.state.mode = this.mode.value; this.render(); this.persist(); });
+    this.mode.addEventListener('change', () => {
+      if (this.view === 'archived') this.archiveView.mode = this.mode.value;
+      else { this.state.mode = this.mode.value; this.persist(); }
+      this.render();
+    });
     const search = element('div', 'vcl-search');
     this.search = element('input', 'vcl-input'); this.search.type = 'search'; this.search.placeholder = '搜索项目或聊天';
     this.search.setAttribute('aria-label', '搜索项目或聊天');
-    this.search.addEventListener('input', () => { this.query = this.search.value; this.render(); });
+    this.search.addEventListener('input', () => {
+      if (this.view === 'archived') this.archiveView.query = this.search.value;
+      else this.query = this.search.value;
+      this.render();
+    });
     this.projectContext = element('div', 'vcl-project-context'); this.projectContext.setAttribute('role', 'status');
     this.projectNotice = element('div', 'vcl-project-notice'); this.projectNotice.setAttribute('role', 'status');
     this.projectNotice.setAttribute('aria-live', 'polite');
@@ -85,8 +102,16 @@ class Navigation {
     this.list = element('div', 'vcl-list'); this.list.setAttribute('aria-label', '项目和聊天');
     this.list.addEventListener('keydown', (event) => this.onListKey(event));
     this.list.addEventListener('scroll', () => { this.dismissNativeMenu(); this.closeProjectMenu(); });
+    this.list.addEventListener('focusin', (event) => {
+      const position = this.view === 'archived' ? this.archiveView : this.normalPosition;
+      position.focused = event.target.closest('[data-vcl-key]')?.dataset.vclKey;
+    });
     const footer = element('div', 'vcl-footer'); this.count = element('span', 'vcl-count');
-    footer.append(this.count, iconButton('back', '返回原版界面', () => this.disable()));
+    this.archiveButton = iconButton('archive', '已归档聊天', () => this.setView('archived'));
+    this.archiveButton.id = 'vcl-archive';
+    const footerActions = element('div', 'vcl-footer-actions');
+    footerActions.append(this.archiveButton, iconButton('back', '返回原版界面', () => this.disable()));
+    footer.append(this.count, footerActions);
     this.resizeHandle = element('div', 'vcl-resize'); this.resizeHandle.tabIndex = 0;
     for (const [key, value] of Object.entries({ role: 'separator', 'aria-orientation': 'vertical',
       'aria-label': '调整项目导航宽度', 'aria-valuemin': '180', 'aria-valuemax': '420' })) this.resizeHandle.setAttribute(key, value);
@@ -116,7 +141,7 @@ class Navigation {
         if (this.draftProjectCwd !== null) this.newProjectChat(this.draftProjectCwd);
         else this.client.request('new-chat', { path: this.draftPath }).catch((error) => this.showError(error));
       }
-      this.render(); this.persist(); this.scheduleRefresh();
+      this.render(); this.persist(); this.invalidateLists();
     }));
     this.cleanups.push(this.bridge.subscribeThreadMenuError((message) => {
       this.closeMenuAnchor(); this.showError(new Error(`官方聊天菜单加载失败：${message}`));
@@ -127,7 +152,7 @@ class Navigation {
           if (!next.supported) { this.dispose(); showLauncher(next.reason || '当前模式暂不支持项目导航'); return; }
           this.info.folders = next.folders; this.setRegistry(next.registry); this.render();
         }).catch((error) => this.showError(error));
-      } else if (event === 'threads-changed') this.scheduleRefresh();
+      } else if (event === 'threads-changed') this.invalidateLists();
       else if (event?.type === 'projects-changed') this.setRegistry(event);
       else if (this.activity.receive(event)) {
         if (event.threadId === this.active && ['started', 'completed'].includes(event.phase)) this.reader.reset();
@@ -149,6 +174,78 @@ class Navigation {
     this.layout(); this.render(); this.refresh();
   }
   isCollapsed() { return this.state.collapsed ?? window.innerWidth < 640; }
+  cache(view) { return view === 'archived' ? this.archiveView : this; }
+  setView(view) {
+    if (this.disposed || this.projectBusy || this.view === view) return;
+    if (document.querySelector('[role="dialog"], [aria-modal="true"]')) {
+      this.showError(new Error('请先完成或关闭当前对话框，再切换聊天列表。')); return;
+    }
+    this.dismissNativeMenu(); this.closeMenuAnchor(); this.closeProjectMenu();
+    const previous = this.view === 'archived' ? this.archiveView : this.normalPosition;
+    previous.scrollTop = this.list.scrollTop;
+    previous.focused = document.activeElement?.closest('[data-vcl-key]')?.dataset.vclKey ?? previous.focused;
+    clearTimeout(previous.refreshTimer);
+    this.projectForm.hidden = true; this.addProjectButton.setAttribute('aria-expanded', 'false');
+    this.view = view;
+    const archived = view === 'archived', target = this.cache(view);
+    this.heading.textContent = archived ? '已归档聊天' : '项目聊天';
+    this.archiveBack.hidden = !archived; this.archiveButton.hidden = archived; this.addProjectButton.hidden = archived;
+    this.mode.value = archived ? target.mode : this.state.mode;
+    this.search.value = target.query;
+    this.search.placeholder = archived ? '搜索已归档项目或聊天' : '搜索项目或聊天';
+    this.search.setAttribute('aria-label', this.search.placeholder);
+    this.list.setAttribute('aria-label', archived ? '已归档项目和聊天' : '项目和聊天');
+    this.notifyProject('');
+    this.status.classList.toggle('vcl-error', !!target.error);
+    this.status.textContent = target.error ?? '';
+    this.render();
+    const position = archived ? target : this.normalPosition;
+    this.list.scrollTop = position.scrollTop ?? 0;
+    const focus = [...this.list.querySelectorAll('[data-vcl-key]')].find((node) => node.dataset.vclKey === position.focused);
+    (focus ?? (archived ? this.archiveBack : this.archiveButton)).focus({ preventScroll: true });
+    if (!target.hasLoaded || target.dirty) this.refresh(view);
+  }
+  invalidateLists() {
+    for (const view of ['active', 'archived']) {
+      const target = this.cache(view); target.revision += 1; target.dirty = true;
+      if (view === this.view || target.hasLoaded) this.scheduleRefresh(view);
+    }
+  }
+  async viewRestoredThread(thread) {
+    this.setView('active');
+    if (this.view !== 'active') return false;
+    try { await this.client.request('navigate', { threadId: thread.id }); return true; }
+    catch (error) { this.showError(error); return false; }
+  }
+  async restoreThread(thread, viewAfter = false) {
+    if (this.disposed || this.restoring.has(thread.id)) return;
+    if (document.querySelector('[role="dialog"], [aria-modal="true"]')) {
+      this.showError(new Error('请先完成或关闭当前对话框，再恢复聊天。')); return;
+    }
+    this.restoring.add(thread.id); this.notifyProject(''); this.render();
+    try {
+      const result = await this.bridge.restoreArchivedThread(thread);
+      if (this.disposed) return;
+      if (result?.restored !== true) throw new Error('官方恢复操作未确认成功，请刷新归档列表后重试。');
+      this.archiveView.threads = this.archiveView.threads.filter((item) => item.id !== thread.id);
+      this.invalidateLists();
+      const viewFailed = viewAfter && result.openable !== false && !await this.viewRestoredThread(thread);
+      if (this.disposed) return;
+      this.notifyProject(result.openable === false ? '聊天已取消归档，但原生聊天加载失败；可刷新项目聊天后重试。'
+        : viewFailed ? `已恢复“${thread.title}”，打开失败，可点击查看重试。` : `已恢复“${thread.title}”。`, result.openable === false || viewFailed);
+      if (result.openable !== false) this.projectNotice.append(iconButton('open', '查看已恢复的聊天', () => this.viewRestoredThread(thread)));
+      if (!viewFailed) { this.status.classList.remove('vcl-error'); this.status.textContent = ''; }
+    } catch (error) {
+      if (!this.disposed) this.notifyProject(`恢复“${thread.title}”失败：${error.message}`, true);
+    } finally {
+      this.restoring.delete(thread.id);
+      if (!this.disposed) {
+        this.render();
+        // A successful restore removes the focused row; leave a usable keyboard target.
+        if (document.activeElement === document.body) (this.view === 'archived' ? this.archiveBack : this.archiveButton).focus();
+      }
+    }
+  }
   buildProjectForm() {
     this.projectForm = element('form', 'vcl-project-form'); this.projectForm.id = 'vcl-project-form'; this.projectForm.hidden = true;
     this.projectForm.setAttribute('aria-label', '添加项目文件夹');
@@ -192,6 +289,7 @@ class Navigation {
     this.projectBusy = busy; this.projectForm.setAttribute('aria-busy', String(busy));
     for (const control of this.projectForm.querySelectorAll('button,input')) control.disabled = busy;
     this.addProjectButton.disabled = busy;
+    this.archiveButton.disabled = busy;
   }
   setRegistry(value) {
     if (!value || !Number.isSafeInteger(value.revision) || !Array.isArray(value.projects) || value.revision < this.registry.revision || this.disposed) return;
@@ -307,7 +405,7 @@ class Navigation {
     if (next && this.activity.acknowledge(next)) this.persist();
     this.active = next; const thread = this.threads.find((item) => item.id === next);
     if (thread) this.closed.delete(normalizePath(thread.cwd));
-    this.render(); if (next && !thread) this.scheduleRefresh();
+    this.render(); if (next && !thread) this.scheduleRefresh('active');
   }
   async newProjectChat(cwd) {
     if (this.creating || this.disposed) return;
@@ -316,37 +414,46 @@ class Navigation {
     catch (error) { this.showError(error); }
     finally { this.creating = false; if (!this.disposed) this.render(); }
   }
-  async refresh() {
+  async refresh(view = this.view) {
     if (this.disposed) return;
-    if (this.loading) { this.refreshAgain = true; return; }
-    this.loading = true; this.refreshButton.disabled = true; this.refreshButton.classList.add('vcl-loading');
-    this.status.classList.remove('vcl-error');
+    const target = this.cache(view);
+    if (target.loading) { target.refreshAgain = true; return; }
+    clearTimeout(target.refreshTimer);
+    target.loading = true; target.error = null;
+    const revision = target.revision;
+    if (this.view === view) { this.status.classList.remove('vcl-error'); this.render(); }
     try {
-      const threads = await loadAllThreads((cursor) => this.client.request('list', { cursor }), {
+      const threads = await loadAllThreads((cursor) => this.client.request('list', { cursor, archived: view === 'archived' }), {
         signal: this.abort.signal,
         onPage: (partial) => {
-          this.status.textContent = `正在读取聊天… ${partial.length}`;
+          if (this.view === view) this.status.textContent = `正在读取${view === 'archived' ? '已归档' : ''}聊天… ${partial.length}`;
         },
       });
       if (this.disposed) return;
-      const firstLoad = !this.hasLoaded;
-      const knownActive = this.threads.some((thread) => thread.id === this.active);
-      this.threads = threads; this.hasLoaded = true;
+      if (revision !== target.revision) { target.refreshAgain = true; return; }
+      const firstLoad = !target.hasLoaded;
+      const knownActive = target.threads.some((thread) => thread.id === this.active);
+      target.threads = threads; target.hasLoaded = true; target.dirty = false;
       const active = threads.find((thread) => thread.id === this.active);
-      if ((firstLoad || !knownActive) && active) this.closed.delete(normalizePath(active.cwd));
-      this.status.textContent = ''; this.render();
-    } catch (error) { if (!this.disposed) this.showError(error); }
+      if (view === 'active' && (firstLoad || !knownActive) && active) this.closed.delete(normalizePath(active.cwd));
+      if (this.view === view) { this.status.textContent = ''; this.render(); }
+    } catch (error) {
+      target.error = error.message; target.dirty = true;
+      if (!this.disposed && this.view === view) this.showError(error);
+    }
     finally {
-      this.loading = false;
+      target.loading = false;
       if (!this.disposed) {
-        this.refreshButton.disabled = false; this.refreshButton.classList.remove('vcl-loading');
-        if (this.refreshAgain) { this.refreshAgain = false; this.scheduleRefresh(); }
+        if (this.view === view) this.render();
+        if (target.refreshAgain) { target.refreshAgain = false; this.scheduleRefresh(view); }
       }
     }
   }
-  scheduleRefresh() {
+  scheduleRefresh(view = this.view) {
     if (this.disposed) return;
-    clearTimeout(this.refreshTimer); this.refreshTimer = setTimeout(() => this.refresh(), 600);
+    const target = this.cache(view);
+    if (view === 'archived' && this.view !== view) { target.dirty = true; return; }
+    clearTimeout(target.refreshTimer); target.refreshTimer = setTimeout(() => this.refresh(view), 600);
   }
   showError(error) {
     if (this.disposed) return;
@@ -415,39 +522,66 @@ class Navigation {
   }
   render() {
     if (this.disposed) return;
+    const archived = this.view === 'archived', target = this.cache(this.view);
+    const query = target.query, closedGroups = target.closed;
+    this.refreshButton.disabled = !!target.loading; this.refreshButton.classList.toggle('vcl-loading', !!target.loading);
+    this.refreshButton.title = archived ? '刷新已归档聊天' : '刷新聊天列表';
+    this.refreshButton.setAttribute('aria-label', this.refreshButton.title);
+    this.list.setAttribute('aria-busy', String(!!target.loading));
     const scrollTop = this.list.scrollTop;
     const focused = document.activeElement?.closest('[data-vcl-key]')?.dataset.vclKey;
-    const groups = groupThreads(this.threads, this.info.folders, {
-      mode: this.state.mode, query: this.query, pinnedProjects: this.state.pinnedProjects,
-      registeredProjects: this.registry.projects,
+    const groups = groupThreads(target.threads, this.info.folders, {
+      mode: archived ? target.mode : this.state.mode, query, archived,
+      pinnedProjects: archived ? [] : this.state.pinnedProjects,
+      registeredProjects: archived ? [] : this.registry.projects,
     });
     const fragment = document.createDocumentFragment(); let visibleThreads = 0;
-    this.projectContext.textContent = this.projectCwd === null ? '' : `新聊天 · ${projectName(this.projectCwd)}`;
-    this.projectContext.title = this.projectCwd ?? '';
+    this.projectContext.textContent = archived ? '恢复后可继续聊天' : this.projectCwd === null ? '' : `新聊天 · ${projectName(this.projectCwd)}`;
+    this.projectContext.title = archived ? '归档记录来自当前扩展宿主；点击标题恢复后查看，恢复图标仅取消归档。' : this.projectCwd ?? '';
     for (const [index, group] of groups.entries()) {
       visibleThreads += group.threads.length; const section = element('section', 'vcl-project');
-      const closed = !this.query && this.closed.has(group.key);
+      const closed = !query && closedGroups.has(group.key);
       const heading = element('button', 'vcl-project-heading'); heading.type = 'button';
       heading.dataset.vclKey = `project:${group.key}`; heading.title = group.path || '无法确定工作目录';
-      if (this.projectCwd !== null && group.key === normalizePath(this.projectCwd)) {
+      if (!archived && this.projectCwd !== null && group.key === normalizePath(this.projectCwd)) {
         heading.classList.add('vcl-selected'); heading.setAttribute('aria-current', 'page');
       }
       heading.setAttribute('aria-expanded', String(!closed)); heading.setAttribute('aria-controls', `vcl-group-${index}`);
       heading.append(icon('chevron', closed ? '' : 'vcl-open'), icon('folder'), element('span', 'vcl-label', group.name));
       if (group.current) heading.append(element('span', 'vcl-current', '当前'));
       heading.append(element('span', 'vcl-group-count', String(group.total)));
-      if (closed && group.threads.some((thread) => this.activity.indicator(thread)?.kind === 'attention')) {
+      if (!archived && closed && group.threads.some((thread) => this.activity.indicator(thread)?.kind === 'attention')) {
         heading.append(this.activityDot({ kind: 'attention', label: '项目中有聊天需要查看' }));
         heading.setAttribute('aria-label', `${group.name}，项目中有聊天需要查看`);
       }
       heading.addEventListener('click', () => {
-        if (this.closed.has(group.key)) this.closed.delete(group.key); else this.closed.add(group.key);
-        this.render(); this.persist();
+        if (closedGroups.has(group.key)) closedGroups.delete(group.key); else closedGroups.add(group.key);
+        this.render(); if (!archived) this.persist();
       });
       const children = element('div', 'vcl-threads'); children.id = `vcl-group-${index}`; children.hidden = closed;
       if (!closed) {
         if (!group.threads.length) children.append(element('div', 'vcl-empty-project', '暂无聊天'));
         for (const thread of group.threads) {
+          if (archived) {
+            const threadRow = element('div', 'vcl-thread-row vcl-archived-row');
+            const row = element('button', 'vcl-thread vcl-archived-thread'); row.type = 'button';
+            row.dataset.vclKey = `thread:${thread.id}`;
+            row.title = `恢复后查看：${thread.title}\n${thread.cwd || '未分类'}`;
+            row.setAttribute('aria-label', `恢复后查看：${thread.title}`);
+            row.disabled = this.restoring.has(thread.id);
+            row.append(element('span', 'vcl-label', thread.title), element('span', 'vcl-thread-meta', row.disabled ? '正在恢复…' : '恢复后查看'));
+            const updated = new Date(thread.updatedAt * 1000);
+            if (thread.updatedAt > 0 && Number.isFinite(updated.getTime())) {
+              const time = element('span', 'vcl-thread-meta', `最后更新 ${updated.toLocaleDateString()}`);
+              time.title = `最后更新 ${updated.toLocaleString()}`; row.append(time);
+            }
+            row.addEventListener('click', () => this.restoreThread(thread, true));
+            const restore = iconButton('restore', `恢复聊天：${thread.title}`, () => this.restoreThread(thread));
+            restore.dataset.vclKey = `restore:${thread.id}`; restore.disabled = row.disabled;
+            restore.classList.add('vcl-restore'); restore.classList.toggle('vcl-loading', row.disabled);
+            threadRow.setAttribute('aria-busy', String(row.disabled)); threadRow.append(row, restore); children.append(threadRow);
+            continue;
+          }
           const threadRow = element('div', `vcl-thread-row${this.active === thread.id ? ' vcl-selected' : ''}`);
           const row = element('button', `vcl-thread${this.active === thread.id ? ' vcl-selected' : ''}`);
           row.type = 'button'; row.dataset.vclKey = `thread:${thread.id}`;
@@ -486,14 +620,15 @@ class Navigation {
       create.dataset.vclKey = `new:${group.key}`; create.classList.add('vcl-new-chat');
       create.disabled = !group.path || this.creating;
       projectRow.append(heading);
-      if (group.path) {
+      if (!archived && group.path) {
         const pin = iconButton('pin', group.pinned ? '取消置顶项目' : '置顶项目', () => this.toggleProjectPin(group));
         pin.dataset.vclKey = `pin:${group.key}`; pin.classList.add('vcl-project-pin');
         pin.classList.toggle('vcl-pinned', group.pinned); pin.setAttribute('aria-pressed', String(group.pinned));
         projectRow.append(pin);
       }
-      projectRow.append(create); section.append(projectRow, children); fragment.append(section);
-      if (group.path) {
+      if (!archived) projectRow.append(create);
+      section.append(projectRow, children); fragment.append(section);
+      if (!archived && group.path) {
         heading.setAttribute('aria-haspopup', 'menu');
         projectRow.addEventListener('contextmenu', (event) => {
           event.preventDefault(); this.openProjectMenu(group, heading, event.clientX || event.clientY ? { x: event.clientX, y: event.clientY } : undefined);
@@ -503,9 +638,10 @@ class Navigation {
         });
       }
     }
-    if (!groups.length) fragment.append(element('div', 'vcl-empty', this.query ? '没有匹配的项目或聊天'
-      : this.state.mode === 'current' && !this.info.folders.length ? '当前窗口没有本地项目' : '暂无聊天'));
-    this.list.replaceChildren(fragment); this.count.textContent = `${groups.length} 个项目 · ${visibleThreads} 个聊天`;
+    if (!groups.length) fragment.append(element('div', 'vcl-empty', query ? archived ? '没有匹配的已归档项目或聊天' : '没有匹配的项目或聊天'
+      : this.mode.value === 'current' && !this.info.folders.length ? '当前窗口没有本地项目'
+      : archived ? this.mode.value === 'current' ? '当前项目暂无已归档聊天，可切换全部项目查看' : '暂无已归档聊天' : '暂无聊天'));
+    this.list.replaceChildren(fragment); this.count.textContent = `${groups.length} 个项目 · ${visibleThreads} 个${archived ? '已归档' : ''}聊天`;
     this.list.scrollTop = scrollTop;
     if (focused) [...this.list.querySelectorAll('[data-vcl-key]')].find((node) => node.dataset.vclKey === focused)?.focus({ preventScroll: true });
   }
@@ -524,7 +660,7 @@ class Navigation {
       return;
     }
     if (event.key === 'ArrowLeft') { row.closest('.vcl-project')?.querySelector('.vcl-project-heading')?.focus(); return; }
-    const rows = [...this.list.querySelectorAll('button:not(:disabled):not(.vcl-chat-more)')];
+    const rows = [...this.list.querySelectorAll('button:not(:disabled):not(.vcl-chat-more):not(.vcl-restore)')];
     const index = rows.indexOf(row.closest('.vcl-thread-row')?.querySelector('.vcl-thread') ?? row);
     const target = event.key === 'Home' ? 0 : event.key === 'End' ? rows.length - 1 : index + (event.key === 'ArrowUp' ? -1 : 1);
     rows[Math.min(rows.length - 1, Math.max(0, target))]?.focus();
@@ -558,6 +694,7 @@ class Navigation {
   dispose() {
     if (this.disposed) return;
     this.disposed = true; this.abort.abort(); clearTimeout(this.refreshTimer); clearTimeout(this.saveTimer);
+    clearTimeout(this.archiveView.refreshTimer);
     this.closeMenuAnchor();
     this.closeProjectMenu();
     this.bridge.setReasoningEnabled(false);

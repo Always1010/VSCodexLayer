@@ -118,6 +118,13 @@ body.vcl-enabled > #root {
 #vcl-navigation .vcl-empty { padding: 22px 12px; text-align: center; color: var(--vcl-muted); }
 #vcl-navigation .vcl-footer { min-height: 36px; display: flex; align-items: center; justify-content: space-between; padding: 4px 8px 4px 12px; border-top: 1px solid var(--vcl-border); }
 #vcl-navigation .vcl-count { font-size: 10px; color: var(--vcl-muted); }
+#vcl-navigation [hidden] { display: none !important; }
+#vcl-navigation .vcl-footer-actions { display: flex; gap: 2px; }
+#vcl-navigation .vcl-archived-thread { flex-direction: column; align-items: flex-start; gap: 2px; min-width: 0; }
+#vcl-navigation .vcl-archived-thread .vcl-label { max-width: 100%; }
+#vcl-navigation .vcl-thread-meta { color: var(--vcl-muted); font-size: 10px; }
+#vcl-navigation .vcl-restore { flex-shrink: 0; }
+#vcl-navigation .vcl-project-notice > button { vertical-align: middle; margin-left: 4px; }
 #vcl-navigation .vcl-resize { position: absolute; inset: 0 -3px 0 auto; width: 6px; cursor: col-resize; touch-action: none; }
 #vcl-navigation .vcl-resize:hover, #vcl-navigation .vcl-resize:focus-visible { background: var(--vscode-focusBorder, #007acc); opacity: .55; }
 #vcl-navigation.vcl-collapsed .vcl-header { padding: 9px 6px; justify-content: center; }

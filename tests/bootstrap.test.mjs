@@ -56,6 +56,19 @@ test('官方仅获取一次 API，草稿状态原样透传，路由观察错误�
   bridge.threadArchived('other'); assert.equal(archived, 'other');
   unsubscribeArchived(); bridge.threadArchived('current'); assert.equal(archived, 'other');
   releaseMenu(); assert.equal(bridge.threadMenuTarget(), null);
+  await assert.rejects(bridge.restoreArchivedThread({ id: 'saved' }), /尚未就绪/);
+  const restoredTargets = [];
+  const removeArchiveActions = bridge.registerArchiveActions({}, { restore: async (target) => {
+    restoredTargets.push(target); return { restored: true };
+  } });
+  const saved = { id: 'saved', title: '归档聊天' };
+  const restoring = bridge.restoreArchivedThread(saved); saved.id = 'other';
+  assert.equal((await restoring).restored, true);
+  assert.equal(restoredTargets[0].id, 'saved', '异步恢复必须绑定点击时的聊天编号');
+  await assert.rejects(bridge.restoreArchivedThread({ id: '../invalid' }), /编号无效/);
+  assert.equal(restoredTargets.length, 1);
+  removeArchiveActions();
+  await assert.rejects(bridge.restoreArchivedThread({ id: 'saved' }), /尚未就绪/);
   assert.equal(bridge.reasoningEnabled(), false);
   let reasoningChanges = 0;
   bridge.subscribeReasoning(() => { throw new Error('broken reasoning subscriber'); });

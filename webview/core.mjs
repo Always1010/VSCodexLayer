@@ -40,7 +40,7 @@ function compareThreads(a, b) {
     || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
 }
 
-export function groupThreads(threads, folders = [], { mode = 'all', query = '', pinnedProjects = [], registeredProjects = [] } = {}) {
+export function groupThreads(threads, folders = [], { mode = 'all', query = '', pinnedProjects = [], registeredProjects = [], archived = false } = {}) {
   const groups = new Map();
   const pins = new Map();
   const registered = new Set();
@@ -74,10 +74,12 @@ export function groupThreads(threads, folders = [], { mode = 'all', query = '', 
   const term = query.trim().toLocaleLowerCase();
   return [...groups.values()]
     .filter((group) => mode !== 'current' || group.current)
+    .filter((group) => !archived || group.threads.length > 0)
     .map((group) => {
       const projectMatches = !term || `${group.name} ${group.path ?? ''}`.toLocaleLowerCase().includes(term);
       const visible = projectMatches ? group.threads : group.threads.filter((thread) => thread.title.toLocaleLowerCase().includes(term));
-      return { ...group, registered: registered.has(group.key), pinned: pins.has(group.key), total: group.threads.length, threads: [...visible].sort(compareThreads) };
+      return { ...group, registered: registered.has(group.key), pinned: pins.has(group.key), total: group.threads.length,
+        threads: [...visible].sort(archived ? (a, b) => (b.updatedAt || 0) - (a.updatedAt || 0) || compareThreads(a, b) : compareThreads) };
     })
     .filter((group) => !term || `${group.name} ${group.path ?? ''}`.toLocaleLowerCase().includes(term) || group.threads.length)
     .sort((a, b) => Number(b.pinned) - Number(a.pinned)

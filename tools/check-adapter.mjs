@@ -151,9 +151,10 @@ const fixture = await fs.mkdtemp(path.join(temporaryParent, 'vscodex-layer-adapt
 if (!fixture.startsWith(`${temporaryParent}${path.sep}vscodex-layer-adapter-`)) throw new Error('临时验证目录异常。');
 try {
   await fs.copyFile(path.join(directory, 'package.json'), path.join(fixture, 'package.json'));
-  const framework = plan.compatibility.chatMenu.framework;
-  await fs.mkdir(path.dirname(path.join(fixture, framework)), { recursive: true });
-  await fs.writeFile(path.join(fixture, framework), await fs.readFile(path.join(directory, framework)));
+  for (const resource of [plan.compatibility.chatMenu.framework, plan.compatibility.chatMenu.archive.path]) {
+    await fs.mkdir(path.dirname(path.join(fixture, resource)), { recursive: true });
+    await fs.writeFile(path.join(fixture, resource), await fs.readFile(path.join(directory, resource)));
+  }
   const dependency = path.join(fixture, DRAFT_SOURCE[0]);
   await fs.mkdir(path.dirname(dependency), { recursive: true });
   await fs.writeFile(dependency, await readOriginal(directory, ...DRAFT_SOURCE));

@@ -138,4 +138,37 @@ export async function checkNativeChatMenu(plan) {
   assert.equal(portal.node.props.children.props.conversationId, 'other');
   assert.equal(portal.node.props.children.props.__vclLayerMenu, true);
   assert.equal(portal.node.props.children.props.archiveNavigation, 'stay');
+
+  // Execute the generated restoration bridge inside the same native providers.
+  const restored = [], invalidated = [], cleanup = [];
+  let restoreError;
+  class OpenError extends Error {}
+  const pins = {};
+  const nativeScope = { get: (atom) => { assert.equal(atom, pins); return true; },
+    queryClient: { invalidateQueries: async (options) => { invalidated.push(options.queryKey); } } };
+  const archiveContext = vm.createContext({
+    __vclReact: () => ({ useRef: () => ({ current: surface }), useEffect: (callback) => cleanup.push(callback()) }),
+    __vclArchiveInit() {}, __vclArchiveScope: () => nativeScope, __vclArchiveScopeAtom: {},
+    __vclArchiveService: (scope, hostId) => {
+      assert.equal(scope, nativeScope); assert.equal(hostId, 'local');
+      return { async unarchiveConversation(id, options) {
+        restored.push({ id, options }); if (restoreError) throw restoreError;
+      } };
+    },
+    __vclArchivePins: pins, __vclArchiveOpenError: OpenError,
+    globalThis: { __vscodexLayerBridge: context.__vscodexLayerBridge },
+  });
+  vm.runInContext(wrapper, archiveContext);
+  archiveContext.__vclArchiveActions();
+  const restoredResult = await context.__vscodexLayerBridge.restoreArchivedThread({ id: 'saved' });
+  assert.equal(restoredResult.restored, true); assert.equal(restoredResult.openable, true);
+  assert.equal(restored[0].id, 'saved'); assert.equal(restored[0].options.useAppServerPins, true);
+  restoreError = new Error('恢复失败');
+  await assert.rejects(context.__vscodexLayerBridge.restoreArchivedThread({ id: 'other' }), /恢复失败/);
+  restoreError = new OpenError('已恢复但加载失败');
+  const partial = await context.__vscodexLayerBridge.restoreArchivedThread({ id: 'partial' });
+  assert.equal(partial.restored, true); assert.equal(partial.openable, false);
+  assert.equal(invalidated.length, 3, '成功、失败和部分恢复后都刷新原生归档缓存');
+  cleanup[0]();
+  await assert.rejects(context.__vscodexLayerBridge.restoreArchivedThread({ id: 'saved' }), /尚未就绪/);
 }

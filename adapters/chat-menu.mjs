@@ -51,12 +51,26 @@ export function patchThreadMenu(source) {
     jsx: imported(source, unique([...source.matchAll(new RegExp(`${escape(jsx)}=(${identifier})\\(\\)`, 'g'))], 'JSX 依赖')[1]) };
 }
 
-export function patchMenuHeader(source, { menuPath, menu, dom }) {
+export function archiveDependencies(source) {
+  const restore = unique([...source.matchAll(new RegExp(`await (${identifier})\\((${identifier}),${identifier}\\)\\.unarchiveConversation\\(${identifier},\\{useAppServerPins:\\2\\.get\\((${identifier})\\)\\}\\)`, 'g'))], '原生归档恢复服务');
+  const scope = unique([...source.matchAll(new RegExp(`\\b${escape(restore[2])}=(${identifier})\\((${identifier})\\)`, 'g'))], '原生归档恢复作用域');
+  const openError = [...new Set([...source.matchAll(new RegExp(`instanceof (${identifier})`, 'g'))].map((match) => match[1]))];
+  const initializer = unique([...source.matchAll(new RegExp(`export\\{(${identifier}) as n,`, 'g'))], '原生归档恢复初始化')[1];
+  return { initializer, scope: imported(source, scope[1]), scopeAtom: imported(source, scope[2]),
+    service: imported(source, restore[1]), pins: imported(source, restore[3]),
+    openError: imported(source, unique(openError, '原生恢复后加载错误')) };
+}
+
+export function patchMenuHeader(source, { menuPath, menu, dom, archive }) {
   const exported = unique([...source.matchAll(new RegExp(`export\\{[^}]*?(${identifier}) as t(?=[,}])`, 'g'))], '首页导出组件')[1];
   const imports = `import{${menu.initializer} as __vclMenuInit,${menu.componentExport} as __vclMenu}from"./${path.basename(menuPath)}";`
     + `import{${menu.react.exported} as __vclReact}from"${menu.react.file}";`
     + `import{${menu.jsx.exported} as __vclJsx}from"${menu.jsx.file}";`
-    + `import{${dom.exported} as __vclDom}from"${dom.file}";`;
+    + `import{${dom.exported} as __vclDom}from"${dom.file}";`
+    + `import{${archive.initializer} as __vclArchiveInit}from"./${path.basename(archive.path)}";`
+    + Object.entries({ scope: '__vclArchiveScope', scopeAtom: '__vclArchiveScopeAtom', service: '__vclArchiveService',
+      pins: '__vclArchivePins', openError: '__vclArchiveOpenError' }).map(([key, alias]) =>
+      `import{${archive[key].exported} as ${alias}}from"${archive[key].file}";`).join('');
   const wrapper = `let __vclMenuBoundary;function __vclMenuOff(){return null}function __vclMenuNoop(){return()=>{}}`
     + `function __vclMenuPortal(){let R=__vclReact(),J=__vclJsx(),bridge=globalThis.__vscodexLayerBridge,surface=R.useRef({}).current;`
     + `R.useEffect(()=>bridge?.registerThreadMenuSurface(surface),[bridge,surface]);`
@@ -68,7 +82,13 @@ export function patchMenuHeader(source, { menuPath, menu, dom }) {
     + `return __vclDom().createPortal(J.jsx(__vclMenuBoundary,{token:target.token,children:J.jsx(__vclMenu,{__vclLayerMenu:true,__vclMenuToken:target.token,conversationId:target.thread.id,hostId:target.thread.hostId,`
     + `cwd:target.thread.cwd,title:target.thread.title,canPin:false,archiveNavigation:"stay",archiveSource:"vscodex_layer",`
     + `triggerButtonClassName:"vcl-native-menu-trigger"},target.thread.id)},target.token),target.container);}`
-    + `function __vclHeader(props){let J=__vclJsx();return J.jsxs(J.Fragment,{children:[J.jsx(${exported},props),J.jsx(__vclMenuPortal,{})]});}`;
+    + `function __vclArchiveActions(){__vclArchiveInit();let R=__vclReact(),scope=__vclArchiveScope(__vclArchiveScopeAtom),surface=R.useRef({}).current;`
+    + `R.useEffect(()=>globalThis.__vscodexLayerBridge?.registerArchiveActions(surface,{restore:async target=>{`
+    + `try{await __vclArchiveService(scope,"local").unarchiveConversation(target.id,{useAppServerPins:scope.get(__vclArchivePins)})}`
+    + `catch(error){if(!(error instanceof __vclArchiveOpenError))throw error;return{restored:true,openable:false}}`
+    + `finally{scope.queryClient.invalidateQueries({queryKey:["archived-threads"]}).catch(()=>{})}`
+    + `return{restored:true,openable:true}}}),[scope,surface]);return null}`
+    + `function __vclHeader(props){let J=__vclJsx();return J.jsxs(J.Fragment,{children:[J.jsx(${exported},props),J.jsx(__vclMenuPortal,{}),J.jsx(__vclArchiveActions,{})]});}`;
   return imports + source.replace(`${exported} as t`, '__vclHeader as t') + '\n' + wrapper;
 }
 
@@ -89,7 +109,14 @@ export async function buildChatMenuPatch(root, header) {
   if (!portal) throw new Error('无法识别原生 React Portal。');
   const requireDom = unique([...framework.matchAll(new RegExp(`${escape(portal)}=${identifier}\\((${identifier})\\(\\),1\\)`, 'g'))], 'React DOM 依赖')[1];
   const dom = { file: menu.react.file, exported: exportName(framework, requireDom) };
-  return { header: patchMenuHeader(header, { menuPath: selected.path, menu, dom }),
+  const archiveCandidates = await Promise.all(entries.filter((name) => name.startsWith('local-preview-footer-') && name.endsWith('.js'))
+    .map(async (name) => {
+      const relative = `webview/assets/${name}`;
+      return { path: relative, content: (await readUnpatched(root, relative)).toString() };
+    }));
+  const archiveSource = unique(archiveCandidates.filter(({ content }) => content.includes('previewUnarchiveError')), '原生归档恢复资源');
+  const archive = { path: archiveSource.path, ...archiveDependencies(archiveSource.content) };
+  return { header: patchMenuHeader(header, { menuPath: selected.path, menu, dom, archive }),
     file: { path: selected.path, originalHash: sha256(selected.bytes), content: menu.content },
-    compatibility: { menu: selected.path, component: menu.component, framework: frameworkPath } };
+    compatibility: { menu: selected.path, component: menu.component, framework: frameworkPath, archive } };
 }
