@@ -44,6 +44,7 @@ function cleanState(value = {}) {
   return {
     revision: Number.isSafeInteger(value.revision) && value.revision >= 0 ? value.revision : 0,
     unreadTurns: Object.fromEntries(Object.entries(value.unreadTurns ?? {}).filter(([id, token]) => validId(id) && validId(token)).slice(-2000)),
+    completedTurns: Object.fromEntries(Object.entries(value.completedTurns ?? {}).filter(([id, token]) => validId(id) && validId(token)).slice(-2000)),
     mode: value.mode === 'current' ? 'current' : 'all',
     width: Math.min(420, Math.max(180, Number(value.width) || 250)),
     collapsed: typeof value.collapsed === 'boolean' ? value.collapsed : null,
@@ -212,14 +213,15 @@ exports.createLayerHost = function createLayerHost({ vscode, provider, webview, 
           }
         } else if (internal && edit?.type === 'turn' && validId(edit.threadId) && validId(edit.turnToken)) {
           const previous = turns.get(edit.threadId);
+          if (edit.phase === 'started' && state.completedTurns[edit.threadId] === edit.turnToken) continue;
           if (previous?.seen.includes(edit.turnToken) || previous?.token === edit.turnToken && (previous.phase === edit.phase || previous.phase === 'completed')) continue;
           const seen = previous && previous.token !== edit.turnToken ? [...previous.seen, previous.token].slice(-8) : previous?.seen ?? [];
           turns.set(edit.threadId, { token: edit.turnToken, phase: edit.phase, seen });
           // Keep the latest token after acknowledgement so duplicate completions cannot resurrect unread.
-          const duplicate = edit.phase === 'completed' && state.unreadTurns[edit.threadId] === edit.turnToken
-            && previous?.phase !== 'started';
+          const duplicate = edit.phase === 'completed' && state.completedTurns[edit.threadId] === edit.turnToken;
           const wasUnread = state.unread.includes(edit.threadId);
           state.unreadTurns[edit.threadId] = edit.turnToken;
+          if (edit.phase === 'completed') state.completedTurns[edit.threadId] = edit.turnToken;
           state.unread = state.unread.filter((id) => id !== edit.threadId);
           if (edit.phase === 'completed' && !duplicate) state.unread.push(edit.threadId);
           else if (duplicate && wasUnread) state.unread.push(edit.threadId);
@@ -395,7 +397,8 @@ exports.createLayerHost = function createLayerHost({ vscode, provider, webview, 
         }
         const activityEvent = { ...event, turnToken };
         changeState([{ type: 'turn', threadId, turnToken, phase: event.phase }], true).then(({ state }) => {
-          if (state.unreadTurns[threadId] === turnToken) post({ type: EVENT, event: {
+          const current = navigationStore.turns.get(threadId);
+          if (state.unreadTurns[threadId] === turnToken && current?.token === turnToken && current.phase === event.phase) post({ type: EVENT, event: {
             ...activityEvent, unread: state.unread.includes(threadId),
           } });
         }).catch((error) => {
