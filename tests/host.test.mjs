@@ -132,6 +132,24 @@ test('目录选择取消不产生变更，拒绝客户端或虚拟目录并校�
   assert.match((await f.request('pick-project-folder')).error, /不存在或无法访问/);
 });
 
+test('POSIX 项目目录必须同时可读取和进入，拒绝后仍可重试', {
+  skip: process.platform === 'win32' || process.getuid?.() === 0,
+}, async (t) => {
+  const f = fixture(); t.after(() => f.host.dispose());
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'vcl-project-access-'));
+  const directory = path.join(root, 'project'); await fs.mkdir(directory);
+  t.after(async () => { await fs.chmod(directory, 0o700); await fs.rm(root, { recursive: true, force: true }); });
+  for (const mode of [0o400, 0o100]) {
+    await fs.chmod(directory, mode);
+    assert.match((await f.request('validate-project', { cwd: directory })).error, /无法访问/);
+    assert.match((await f.request('new-project-chat', { cwd: directory, path: '/' })).error, /无法访问/);
+    assert.equal(f.messages.some((message) => message.type === 'navigate-to-route'), false);
+  }
+  await fs.chmod(directory, 0o500);
+  assert.equal((await f.request('validate-project', { cwd: directory })).result.cwd, directory);
+  assert.equal((await f.request('new-project-chat', { cwd: directory, path: '/' })).result.cwd, directory);
+});
+
 test('项目置顶偏好保存并过滤无效目录，旧偏好正常读取', async (t) => {
   const f = fixture(); t.after(() => f.host.dispose());
   assert.deepEqual((await f.request('init')).result.state.pinnedProjects, []);

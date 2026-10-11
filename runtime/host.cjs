@@ -285,7 +285,7 @@ exports.createLayerHost = function createLayerHost({ vscode, provider, webview, 
     const directory = projectPath(cwd);
     try {
       if (!(await fs.stat(directory)).isDirectory()) throw new Error('not a directory');
-      await fs.access(directory, constants.R_OK);
+      await fs.access(directory, constants.R_OK | (process.platform === 'win32' ? 0 : constants.X_OK));
     } catch { throw new Error(`项目目录不存在或无法访问：${directory}`); }
     return { cwd: directory };
   }
