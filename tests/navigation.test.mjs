@@ -246,3 +246,40 @@ test('前端只提交具体操作，广播保留待提交修改，失败重试�
   assert.ok(nav.activity.unread.has('thread'), '旧轮次待提交回执不能隐藏新提醒');
   await nav.flushState(); assert.ok(remote.unread.includes('thread'));
 });
+
+test('停用取消延迟保存，等待已有写入，重复点击及失败重试不丢状态', async () => {
+  let remote = { revision: 0, mode: 'all', width: 250, groups: [], pinnedProjects: [], unread: [] };
+  const calls = []; let release; let fail = false; let timer;
+  const nav = await navigationFixture({ async request(_method, params) {
+    calls.push(params.operations);
+    if (calls.length === 1) await new Promise((resolve) => { release = resolve; });
+    if (fail) throw new Error('保存失败');
+    remote = { ...overlayNavigationEdits(remote, params.operations), revision: remote.revision + 1 };
+    return { state: remote };
+  } }, { setTimeout(callback) { timer = callback; return 1; }, clearTimeout() { timer = null; } });
+  nav.dispose = () => { nav.disposed = true; }; nav.showError = () => {};
+  nav.state.width = 310; nav.persist();
+  const saving = nav.flushState();
+  const disabling = nav.disable();
+  await nav.disable();
+  assert.equal(timer, null); assert.equal(calls.length, 1);
+  nav.state.width = 320; nav.persist();
+  release(); await saving; await disabling;
+  assert.equal(calls.length, 2); assert.equal(remote.width, 310); assert.equal(remote.disabled, true);
+  assert.equal(nav.disposed, true);
+  nav.queueEdits([{ type: 'set', key: 'disabled', value: false }]);
+  assert.equal(calls.length, 2, '销毁后不再保存');
+
+  const retry = await navigationFixture({ async request(_method, params) {
+    if (fail) throw new Error('保存失败');
+    remote = { ...overlayNavigationEdits(remote, params.operations), revision: remote.revision + 1 };
+    return { state: remote };
+  } }, { setTimeout: () => 1, clearTimeout() {} });
+  retry.dispose = () => { retry.disposed = true; }; retry.showError = () => {};
+  retry.state.width = 330; retry.persist(); fail = true;
+  await retry.disable();
+  assert.equal(retry.disposed, false); assert.equal(retry.disabling, false);
+  assert.ok(retry.pendingEdits.length, '失败保留待提交修改');
+  fail = false; await retry.disable();
+  assert.equal(remote.width, 330); assert.equal(remote.disabled, true); assert.equal(retry.disposed, true);
+});
