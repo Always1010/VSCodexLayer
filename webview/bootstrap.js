@@ -40,7 +40,10 @@
       if (!params.has('vclProjectCwd')) return null;
       const cwd = params.get('vclProjectCwd');
       // Keep invalid project markers scoped too: submission must reject them instead of falling back.
-      const key = cwd.replaceAll('\\', '/').replace(/\/$/, '').toLowerCase();
+      const windows = /^[a-z]:[\\/]/i.test(cwd) || cwd.startsWith('\\\\') || cwd.startsWith('//');
+      // Preserve existing Windows draft identities; Linux directories are case sensitive.
+      const key = windows ? cwd.replaceAll('\\', '/').replace(/\/$/, '').toLowerCase()
+        : cwd === '/' ? cwd : cwd.replace(/\/+$/, '');
       return { pathname, routeTemplate, search, routeKind: pathname === '/' ? 'home' : 'new-thread-panel',
         projectContext: null, vclProjectCwd: cwd, vclDraftKey: `vscodex-layer-new:${pathname}:${encodeURIComponent(key)}` };
     },

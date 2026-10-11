@@ -21,3 +21,13 @@
 - 解决方案：从 Webview 初始化函数已有的 `Uri.joinPath(this.extensionUri, "webview")` 调用动态捕获 VS Code API 命名空间，从官方 WSL 配置判断结构动态捕获运行模式函数，保留 Windows 本地窗口使用 WSL 后端时的拒绝行为；初始化失败时记录实际异常。
 - 验证：对当前 `26.51002.51308` 原件生成兼容补丁，在隔离环境实际执行宿主注入入口及初始化消息，验证本地支持、WSL 后端拒绝、远程 WSL 拒绝和错误日志；在临时副本完成语法、应用、重复应用和恢复检查。
 - 相关文件：`adapters/codex-compatible.mjs`、`tools/check-compatible.mjs`。
+
+## ISSUE-003：Linux 项目草稿和导航路径可能被合并
+
+- 日期：2026-10-11
+- 状态：已解决
+- 现象：Linux 上 `/home/ubuntu/Project` 与 `/home/ubuntu/project` 生成相同的项目草稿键；目录名含反斜线或尾部空格时，导航可能误合并不同目录。
+- 原因：草稿键一律转换成小写及替换反斜线，导航路径一律替换反斜线并去除首尾空格，沿用了 Windows 路径假设。
+- 解决方案：按路径类型处理，Linux 草稿键保留大小写和合法字符，导航保留反斜线及尾部空格；Windows 草稿键继续使用原有规则，首页／面板草稿仍独立。
+- 验证：bootstrap 和导航测试覆盖大小写不同目录、反斜线与目录分隔符、尾部空格、根目录及首页／面板隔离；Linux ARM64 插件临时副本验证生成补丁、语法、重复应用和恢复。真实 Remote SSH 界面验收待进行。
+- 相关文件：`webview/bootstrap.js`、`webview/core.mjs`、`tests/bootstrap.test.mjs`、`tests/navigation.test.mjs`、`docs/USAGE.md`。
