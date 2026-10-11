@@ -133,6 +133,7 @@ export async function buildPatchPlan(directory) {
     ['webview/bootstrap.js', 'webview/vscodex-layer/bootstrap.js'],
     ['webview/client.mjs', 'webview/vscodex-layer/client.mjs'],
     ['webview/core.mjs', 'webview/vscodex-layer/core.mjs'],
+    ['webview/reading.mjs', 'webview/vscodex-layer/reading.mjs'],
     ['webview/layer.mjs', 'webview/vscodex-layer/layer.mjs'],
     ['webview/layer.css', 'webview/vscodex-layer/layer.css'],
   ];

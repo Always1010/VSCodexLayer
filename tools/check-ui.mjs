@@ -6,9 +6,12 @@ import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
+const readingOnly = process.argv.length === 3 && process.argv[2] === '--reading';
+if (process.argv.length > 2 && !readingOnly) throw new Error('用法：node tools/check-ui.mjs [--reading]');
 const output = path.join(root, '.scratch', 'ui');
 await fs.mkdir(output, { recursive: true });
 const executable = [
+  '/usr/bin/chromium-browser', '/usr/bin/chromium', '/usr/bin/google-chrome',
   path.join(process.env.ProgramFiles || 'C:/Program Files', 'Google/Chrome/Application/chrome.exe'),
   path.join(process.env['ProgramFiles(x86)'] || 'C:/Program Files (x86)', 'Microsoft/Edge/Application/msedge.exe'),
 ].find((file) => { try { return !!process.getBuiltinModule('node:fs').statSync(file); } catch { return false; } });
@@ -50,7 +53,7 @@ setTimeout(()=>window.postMessage({type:'vscodex-layer/response',id:message.id,r
 </head><body><main id="root"><header><button data-vcl-chat-back aria-label="返回">←</button><span id="native-title"></span></header><div data-vcl-home-history>聊天 · 最近聊天 · 查看全部</div><article><h1>右侧保留官方聊天界面</h1><p>这里使用模拟聊天区域检查导航布局。实际增强复用官方消息、输入框、模型选择、工具执行和审批。</p><p>选择左侧聊天，在同一个页面切换。项目可以折叠，支持全部项目和当前项目筛选。</p></article><textarea id="native-composer" aria-label="聊天输入框">未发送的草稿</textarea><div class="note">界面验证示意 · 模拟数据</div></main>
 <script type="module">window.nativeRoot=document.getElementById('root');window.nativeApi=acquireVsCodeApi();mockNavigate('/');nativeApi.postMessage({type:'ready'});</script>
 </body></html>`;
-const allowed = new Set(['bootstrap.js', 'client.mjs', 'core.mjs', 'layer.mjs', 'layer.css']);
+const allowed = new Set(['bootstrap.js', 'client.mjs', 'core.mjs', 'reading.mjs', 'layer.mjs', 'layer.css']);
 const server = http.createServer(async (request, response) => {
   const url = new URL(request.url, 'http://localhost');
   if (url.pathname === '/') { response.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }); response.end(page); return; }
@@ -122,6 +125,71 @@ try {
   await send('Emulation.setDeviceMetricsOverride', { width: 1100, height: 800, deviceScaleFactor: 1, mobile: false }, sessionId);
   await send('Page.navigate', { url: address }, sessionId);
   await waitFor(`document.querySelector('.vcl-count')?.textContent.includes('63 个聊天')`);
+  if (readingOnly) {
+    await send('Page.bringToFront', {}, sessionId);
+    await evaluate(`document.querySelector('[data-vcl-key="thread:thread-0"]').click();
+      const area=document.querySelector('article');area.className='thread-scroll-container';area.tabIndex=0;
+      Object.assign(area.style,{height:'300px',flex:'none',overflow:'auto',padding:'0'});
+      area.innerHTML='<div style="flex-shrink:0"><div style="height:1200px">旧消息</div><div data-vcl-reply-thread="thread-0" data-vcl-reply-item="reply" data-vcl-reply-completed="true"><div data-markdown-text-style="assistant-message" style="min-height:160px">最新完成的回复</div></div></div>';
+      window.readingArea=area;window.replyBody=area.querySelector('[data-markdown-text-style]');
+      window.activityEvent=(phase='completed',replyItemId='reply',status='idle',activeFlags=[])=>window.postMessage({type:'vscodex-layer/event',event:{type:'thread-activity',threadId:'thread-0',phase,replyItemId,status,activeFlags}},location.origin)`);
+    const blue = `!!document.querySelector('[data-vcl-key="thread:thread-0"] .vcl-attention')`;
+    const complete = async (item = 'reply', status = 'idle', flags = []) => {
+      await evaluate(`activityEvent('completed',${JSON.stringify(item)},${JSON.stringify(status)},${JSON.stringify(flags)})`);
+      await waitFor(blue);
+    };
+    const settle = () => evaluate('new Promise(resolve=>setTimeout(resolve,400))');
+    const gesture = async (key = null) => {
+      const { x, y } = await evaluate(`(()=>{const r=readingArea.getBoundingClientRect();return{x:r.left+50,y:r.top+80}})()`);
+      if (key) {
+        await evaluate('readingArea.focus()');
+        await send('Input.dispatchKeyEvent', { type: 'keyDown', key, code: key }, sessionId);
+        await send('Input.dispatchKeyEvent', { type: 'keyUp', key, code: key }, sessionId);
+      } else await send('Input.dispatchMouseEvent', { type: 'mouseWheel', x, y, deltaX: 0, deltaY: 1 }, sessionId);
+    };
+    await complete();
+    await gesture(); await settle();
+    await assertBrowser(blue, '阅读旧消息误清除结束蓝点');
+    await evaluate('readingArea.scrollTop=readingArea.scrollHeight');
+    await send('Input.dispatchMouseEvent', { type: 'mouseWheel', x: 40, y: 300, deltaX: 0, deltaY: 1 }, sessionId);
+    // Cancel prior reading intent, then verify programmatic scrolling and sidebar gestures alone.
+    await evaluate(`window.dispatchEvent(new Event('blur'));readingArea.scrollTop=readingArea.scrollHeight`);
+    await settle(); await assertBrowser(blue, '自动滚动或导航区操作误清除蓝点');
+    await gesture(); await waitFor(`!(${blue})`);
+    await waitFor(`!mockState.unread.includes('thread-0')`);
+    await complete();
+    await evaluate(`replyBody.style.minHeight='1000px';readingArea.scrollTop=1250`);
+    await gesture('ArrowDown'); await waitFor(`!(${blue})`);
+    await assertBrowser('readingArea.scrollTop+readingArea.clientHeight<readingArea.scrollHeight-200', '长回复阅读被限制为必须到底部');
+    await complete();
+    await gesture();
+    await evaluate(`activityEvent('started','new-reply','active');activityEvent('completed','new-reply')`);
+    await settle(); await assertBrowser(blue, '旧阅读回调误清除新轮次蓝点');
+    await gesture(); await settle(); await assertBrowser(blue, '旧回复误认作新轮次结果');
+    await evaluate(`replyBody.parentElement.dataset.vclReplyItem='new-reply';replyBody.parentElement.dataset.vclReplyCompleted='false'`);
+    await gesture(); await settle(); await assertBrowser(blue, '未完成的正文误清除蓝点');
+    await evaluate(`replyBody.parentElement.dataset.vclReplyCompleted='true'`);
+    await waitFor(`!(${blue})`);
+    await complete('new-reply');
+    await gesture(); await evaluate('readingArea.scrollTop=0');
+    await settle(); await assertBrowser(blue, '结果闪过可视区域就被标记已读');
+    await evaluate(`readingArea.scrollTop=1250;Object.defineProperty(document,'visibilityState',{configurable:true,value:'hidden'})`);
+    await gesture(); await settle(); await assertBrowser(blue, '隐藏面板误清除蓝点');
+    await evaluate(`delete document.visibilityState;document.hasFocus=()=>false`);
+    await gesture(); await settle(); await assertBrowser(blue, '无焦点面板误清除蓝点');
+    await evaluate('delete document.hasFocus');
+    for (const [status, flags] of [['active',['waitingOnApproval']],['active',['waitingOnUserInput']],['systemError',[]]]) {
+      await evaluate(`activityEvent('status','new-reply',${JSON.stringify(status)},${JSON.stringify(flags)})`);
+      await gesture(); await settle(); await assertBrowser(blue, '阅读误清除审批、输入或错误提示');
+    }
+    await complete('new-reply');
+    await evaluate(`replyBody.style.minHeight='160px';Object.assign(readingArea.style,{display:'flex',flexDirection:'column-reverse'});readingArea.scrollTop=0`);
+    await gesture(); await waitFor(`!(${blue})`);
+    await complete('new-reply');
+    await evaluate(`readingArea.querySelector('[data-vcl-reply-thread]').remove()`);
+    await gesture(); await settle(); await assertBrowser(blue, '正文定位失败时误清除蓝点');
+    console.log('阅读回执无头检查通过：当前回复、长回复、反向滚动、旧消息、自动滚动、导航区、隐藏和焦点、完成前后时序、新轮次及审批／输入／错误提示。');
+  } else {
   await assertBrowser(`mockRequests.filter(r=>r.method==='list').length===2`, '没有读取完整分页');
   await assertBrowser(`document.querySelectorAll('.vcl-project-heading').length===3`, '同名项目被错误合并');
   await assertBrowser(`document.querySelectorAll('#vcl-navigation img').length===0`, '聊天标题被当成 HTML 执行');
@@ -242,6 +310,7 @@ try {
   await screenshot('navigation-narrow.png');
   console.log('无头界面检查通过：提醒与结束蓝点、折叠项目汇总、未读保存与查看清除，以及项目新建、草稿隔离、搜索筛选和导航布局。');
   console.log(`模拟界面截图：${output}`);
+  }
 } finally {
   if (socket?.readyState === WebSocket.OPEN) {
     try { await send('Browser.close'); } catch { /* Browser may close before acknowledging. */ }

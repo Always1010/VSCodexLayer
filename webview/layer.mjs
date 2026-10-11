@@ -1,5 +1,6 @@
 import { LayerClient } from './client.mjs';
 import { groupThreads, normalizePath, projectName, routeThreadId, loadAllThreads, ThreadActivity } from './core.mjs';
+import { ReplyReader } from './reading.mjs';
 
 const SVG = 'http://www.w3.org/2000/svg';
 const icons = {
@@ -80,6 +81,8 @@ class Navigation {
     this.rail.append(header, controls, this.status, this.list, footer, this.resizeHandle);
     document.body.append(this.rail); document.body.classList.add('vcl-enabled');
     this.bridge.setReasoningEnabled(true);
+    this.reader = new ReplyReader(this.activity, () => this.active, () => { this.render(); this.persist(); });
+    this.cleanups.push(() => this.reader.dispose());
     this.cleanups.push(this.bridge.subscribe(({ route }) => this.onRoute(route)));
     this.cleanups.push(this.bridge.setNewChatHandler(() => {
       if (this.draftProjectCwd !== null) this.newProjectChat(this.draftProjectCwd);
@@ -92,7 +95,10 @@ class Navigation {
           this.info.folders = next.folders; this.render();
         }).catch((error) => this.showError(error));
       } else if (event === 'threads-changed') this.scheduleRefresh();
-      else if (this.activity.receive(event)) { this.render(); this.persist(); }
+      else if (this.activity.receive(event)) {
+        if (event.threadId === this.active && ['started', 'completed'].includes(event.phase)) this.reader.reset();
+        this.render(); this.persist();
+      }
     }));
     const resize = () => this.layout(); window.addEventListener('resize', resize);
     this.cleanups.push(() => window.removeEventListener('resize', resize));
@@ -130,6 +136,7 @@ class Navigation {
     }
     const next = routeThreadId(route);
     if (this.active === next && !changedProject) return;
+    this.reader.reset();
     if (next && this.activity.acknowledge(next)) this.persist();
     this.active = next; const thread = this.threads.find((item) => item.id === next);
     if (thread) this.closed.delete(normalizePath(thread.cwd));

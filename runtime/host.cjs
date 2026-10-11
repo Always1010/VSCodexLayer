@@ -158,10 +158,18 @@ exports.createLayerHost = function createLayerHost({ vscode, provider, webview, 
   }
   const changedMethods = new Set(['thread/started', 'thread/name/updated', 'thread/archived', 'thread/unarchived',
     'thread/status/changed', 'thread/metadata/updated', 'turn/started', 'turn/completed']);
+  const replies = new Map();
+  const replyId = (item) => item?.type === 'agentMessage' && item.phase !== 'commentary'
+    && typeof item.id === 'string' && /^[\w-]{1,200}$/.test(item.id) ? item.id : null;
   disposables.push(provider.codexMcpConnection.registerInternalNotificationHandler((notification) => {
     const { method, params = {} } = notification;
     const threadId = method === 'thread/started' ? params.thread?.id : params.threadId;
     if (typeof threadId === 'string' && /^[\w-]{1,200}$/.test(threadId)) {
+      if (method === 'turn/started') replies.delete(threadId);
+      if (method === 'item/completed' && typeof params.turnId === 'string'
+        && /^[\w-]{1,200}$/.test(params.turnId) && replyId(params.item)) {
+        replies.set(threadId, { turnId: params.turnId, itemId: replyId(params.item) });
+      }
       let event;
       if (method === 'thread/status/changed' || method === 'thread/started') {
         event = { type: 'thread-activity', threadId, phase: 'status',
@@ -169,6 +177,13 @@ exports.createLayerHost = function createLayerHost({ vscode, provider, webview, 
       } else if (method === 'turn/started' || method === 'turn/completed') {
         event = { type: 'thread-activity', threadId, phase: method === 'turn/started' ? 'started' : 'completed',
           status: method === 'turn/started' ? 'active' : params.turn?.status === 'failed' ? 'systemError' : 'idle', activeFlags: [] };
+        if (method === 'turn/completed') {
+          const remembered = replies.get(threadId);
+          const itemId = Array.isArray(params.turn?.items) ? params.turn.items.map(replyId).filter(Boolean).at(-1) : null;
+          const completedId = itemId ?? (remembered?.turnId === params.turn?.id ? remembered?.itemId : null);
+          if (completedId) event.replyItemId = completedId;
+          replies.delete(threadId);
+        }
       }
       if (event) post({ type: EVENT, event });
     }
