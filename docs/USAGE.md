@@ -68,6 +68,8 @@ Linux ARM64 包 `26.51007.21434` 的结构探测、生成宿主入口、模拟 S
 
 适配层使用已安装插件的现有 App Server 连接读取 `thread/list`。导航通过官方 `navigate-to-route` 消息在发起请求的 Webview 打开聊天。前端路由接入点报告当前路径及查询参数；项目草稿用 `vclProjectCwd` 携带目录，接入官方路由、草稿身份、配置读取和首次创建参数，创建及发送仍由官方完成。普通新聊天操作通过同面板官方路由返回草稿入口，不替换官方路由器。增强脚本保留官方 VS Code API 的一次获取机制和 `getState`、`setState` 行为，不另起 Codex 进程、不主动发送聊天消息。
 
+目录项目草稿没有桌面项目编号，创建时不提交桌面项目归属，避免被登记为需要桌面目录分配的无项目线程。若旧补丁已创建线程但首条消息报错 `projectless-thread-cwd not supported in extension`，更新后用项目 `＋` 新建聊天；补丁不自动改写失败线程的历史或归属。
+
 这属于本地增强补丁，不是官方提供的稳定 UI 扩展接口。相关公共文档：[VS Code Webview](https://code.visualstudio.com/api/extension-guides/webview)、[Codex App Server](https://learn.chatgpt.com/docs/app-server)。
 
 ## 验证
@@ -78,7 +80,7 @@ Linux ARM64 包 `26.51007.21434` 的结构探测、生成宿主入口、模拟 S
 
 `node --test tests/bootstrap.test.mjs` 检查官方 API 的一次获取和草稿状态透传。`node tools/check-adapter.mjs` 只读本机官方插件，在临时副本检查严格模式接入补丁的语法、应用与恢复。
 
-`node tools/check-compatible.mjs` 对当前实际启用版本生成结构兼容补丁，检查动态资源选择、全部增强标记和 JavaScript 语法，在隔离环境执行宿主入口以验证初始化、SSH / WSL 支持边界和错误日志，并在临时副本验证应用、重复应用和恢复；不会修改实际插件。
+`node tools/check-compatible.mjs` 对当前实际启用版本生成结构兼容补丁，检查动态资源选择、全部增强标记和 JavaScript 语法，在隔离环境执行宿主入口以验证初始化、SSH / WSL 支持边界和错误日志；同时执行官方 Composer 与创建参数转换，使用真实归属保存回调和首次消息工作区判断，复现旧补丁的无项目目录分配错误，并检查修复后的跨目录首次消息准备及失效目录拒绝。配置读取、线程创建和消息发送以替身截停，不产生实际聊天；最后在临时副本验证补丁应用、重复应用和恢复，不修改实际插件。
 
 接入检查也支持 `--extension "插件绝对路径"`，目标已经应用补丁时从经过校验的备份读取原件，不复制已修改文件作为原件。
 

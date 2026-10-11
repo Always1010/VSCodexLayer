@@ -134,6 +134,7 @@ await assert.rejects(nativeSubmit.handleSubmitLocal(firstContext, 'D:/Current/Pr
 assert.equal(validations[0], 'D:/Other/Project');
 assert.equal(configurations[0].cwd, 'D:/Other/Project');
 assert.equal(creations[0].baseParams.cwd, 'D:/Other/Project');
+assert.equal(creations[0].baseParams.projectAssignment, undefined, '目录项目聊天不能被保存为桌面无项目线程');
 assert.equal(JSON.stringify(creations[0].baseParams.workspaceRoots), JSON.stringify(['D:/Other/Project']));
 assert.equal(creations[0].baseParams.input[0].text, '检查项目');
 validationError = new Error('目录已删除');

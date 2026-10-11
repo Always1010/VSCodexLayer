@@ -114,6 +114,15 @@ function arrowBody(source, marker, label) {
   return { start: start + 3, end, body: source.slice(start + 3, end) };
 }
 
+export function patchProjectCreationMembership(source) {
+  // A null assignment asks the desktop runtime to mark a thread projectless.
+  // Directory-scoped IDE chats have no desktop project ID; leave membership unset.
+  return replaceUnique(source,
+    new RegExp(`baseParams:(${identifier}),prepareFirstTurn:(${identifier})\\.worktreePrompt`),
+    (_all, params, context) => `baseParams:${context}.vclProjectCwd!==undefined?{...${params},projectAssignment:undefined}:${params},prepareFirstTurn:${context}.worktreePrompt`,
+    '项目聊天创建归属');
+}
+
 function patchComposer(source) {
   let part = arrowBody(source, 'useScopedProject&&', '项目目标');
   const signature = new RegExp(`\\((${identifier}),\\{get:(${identifier}),scope:(${identifier})\\}\\)=>\\{$`)
@@ -189,7 +198,7 @@ function patchComposer(source) {
   const [submitHeader, context, cwd, , target] = submitMatch;
   const injection = `if(${context}.vclProjectCwd!==undefined){let __vclProject=await globalThis.__vscodexLayerBridge.validateProject(${context}.vclProjectCwd);if(!${mounted}())throw new DOMException(\`Composer was closed\`,\`AbortError\`);${context}={...${context},existingWorkspaceRoot:__vclProject.cwd,workspaceRoots:[__vclProject.cwd],localProjectId:undefined,remoteProjectId:undefined,cloudThreadPrototype:undefined,aeonStartTarget:undefined};${target}={...${target},hostId:\`local\`,workspaceRoots:[__vclProject.cwd]};${cwd}=__vclProject.cwd;}`;
   source = source.slice(0, submitStart) + submitHeader + injection + source.slice(submitStart + submitHeader.length);
-  return source;
+  return patchProjectCreationMembership(source);
 }
 
 function patchHeader(source) {

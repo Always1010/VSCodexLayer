@@ -1,6 +1,7 @@
 import fs from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { extensionRoot, readOriginal } from '../lib/patch-engine.mjs';
+import { patchProjectCreationMembership } from './codex-compatible.mjs';
 
 export const VERSION = '26.5930.51102';
 export const ADAPTER = `codex-${VERSION}-v4`;
@@ -114,6 +115,7 @@ export async function buildPatchPlan(directory) {
     + 'remoteProjectId:undefined,cloudThreadPrototype:undefined,aeonStartTarget:undefined};'
     + 'a={...a,hostId:`local`,workspaceRoots:[__vclProject.cwd]};r=__vclProject.cwd;}'
     + 'let f=e.get(pC)');
+  originals[4].content = patchProjectCreationMembership(originals[4].content);
   const history = 'm&&(0,$.jsx)(`div`,{children:(0,$.jsx)(Et,{tasksQuery:b,mergedTasks:S})})';
   originals[3].content = replaceOnce(originals[3].content, history,
     'm&&(0,$.jsx)(`div`,{"data-vcl-home-history":true,children:(0,$.jsx)(Et,{tasksQuery:b,mergedTasks:S})})');
