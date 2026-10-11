@@ -3,6 +3,8 @@
   if (globalThis.__vscodexLayerBridge || typeof globalThis.acquireVsCodeApi !== 'function') return;
   const acquire = globalThis.acquireVsCodeApi;
   const subscribers = new Set();
+  const reasoningSubscribers = new Set();
+  let reasoningEnabled = false;
   let nativeApi;
   let nativeReady = false;
   let newChatHandler;
@@ -20,6 +22,18 @@
     });
   };
   globalThis.__vscodexLayerBridge = Object.freeze({
+    reasoningEnabled() { return reasoningEnabled; },
+    subscribeReasoning(callback) {
+      reasoningSubscribers.add(callback);
+      return () => reasoningSubscribers.delete(callback);
+    },
+    setReasoningEnabled(enabled) {
+      if (reasoningEnabled === (enabled === true)) return;
+      reasoningEnabled = enabled === true;
+      for (const callback of reasoningSubscribers) {
+        try { callback(); } catch { /* A failed enhancement subscriber must not affect the native app. */ }
+      }
+    },
     observeRoute(path) {
       if (typeof path === 'string' && path !== route) { route = path; notify(); }
     },

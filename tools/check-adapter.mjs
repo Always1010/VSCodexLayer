@@ -7,6 +7,7 @@ import { execFileSync } from 'node:child_process';
 import { findExtension } from './layer.mjs';
 import { buildPatchPlan, DRAFT_SOURCE } from '../adapters/codex-26.5930.51102.mjs';
 import { applyPatch, restorePatch, sha256, readOriginal } from '../lib/patch-engine.mjs';
+import { checkNativeReasoning } from './native-reasoning.mjs';
 
 // Only read the real installation. Exercise mutations in a newly created fixture.
 const args = process.argv.slice(2);
@@ -14,6 +15,7 @@ if (args.length && (args[0] !== '--extension' || args.length !== 2)) throw new E
 const directory = args[1] ?? await findExtension();
 const plan = await buildPatchPlan(directory);
 new Script(plan.files.find((entry) => entry.path === 'out/extension.js').content);
+await checkNativeReasoning(plan);
 // Exercise the exact supported native draft functions without importing the app or opening VS Code.
 const composerSource = plan.files.find((entry) => entry.path === DRAFT_SOURCE[0]).content;
 const routeSource = plan.files.find((entry) => entry.path === 'webview/assets/app-initial-3a0869cff48f.js').content;

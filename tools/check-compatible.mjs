@@ -6,9 +6,10 @@ import path from 'node:path';
 import vm from 'node:vm';
 import { createRequire } from 'node:module';
 import { buildCompatiblePatchPlan } from '../adapters/codex-compatible.mjs';
-import { applyPatch, readUnpatched, restorePatch, sha256 } from '../lib/patch-engine.mjs';
+import { applyPatch, inspectPatch, readUnpatched, restorePatch, sha256 } from '../lib/patch-engine.mjs';
 import { findExtension } from './layer.mjs';
 import { checkProjectSubmit } from './native-project-submit.mjs';
+import { checkNativeReasoning } from './native-reasoning.mjs';
 
 const args = process.argv.slice(2);
 if (args.length && (args[0] !== '--extension' || args.length !== 2)) {
@@ -78,6 +79,7 @@ assert.equal((composer.match(/projectCwd\(/g) ?? []).length, 5);
 assert.equal((composer.match(/validateProject\(/g) ?? []).length, 1);
 assert.equal((header.match(/data-vcl-home-history/g) ?? []).length, 2);
 assert.equal((header.match(/data-vcl-chat-back/g) ?? []).length, 1);
+await checkNativeReasoning(plan);
 
 const runtimeFiles = [];
 for (const name of await fs.readdir(path.join(directory, 'webview', 'assets'))) {
@@ -102,7 +104,17 @@ try {
     await fs.mkdir(path.dirname(target), { recursive: true });
     await fs.writeFile(target, await readUnpatched(directory, entry.path));
   }
-  const result = await applyPatch(fixture, plan);
+  if ((await inspectPatch(directory)).status === 'patched') {
+    const previous = JSON.parse(await fs.readFile(path.join(directory, '.vscodex-layer', 'manifest.json'), 'utf8'));
+    const previousFiles = await Promise.all(previous.files.map(async (entry) => {
+      const content = await fs.readFile(path.join(directory, entry.path));
+      assert.equal(sha256(content), entry.patchedHash, '已安装补丁必须与校验清单一致');
+      return { path: entry.path, originalHash: entry.originalHash, content };
+    }));
+    await applyPatch(fixture, { adapter: previous.adapter, extensionVersion: previous.extensionVersion, files: previousFiles });
+  }
+  // Also exercise updating the currently installed navigation-only patch in the fixture.
+  const result = await applyPatch(fixture, await buildCompatiblePatchPlan(fixture));
   assert.equal(result.status, 'patched');
   const rebuilt = await buildCompatiblePatchPlan(fixture);
   assert.equal((await applyPatch(fixture, rebuilt)).changed, false);
@@ -115,5 +127,5 @@ try {
   for (const entry of plan.files.filter((file) => file.originalHash !== null)) {
     assert.equal(sha256(await fs.readFile(path.join(fixture, entry.path))), entry.originalHash);
   }
-  console.log(`官方 ${plan.extensionVersion} 兼容结构校验通过：${plan.compatibility.family}；动态资源、宿主初始化、SSH / WSL 边界、项目首条消息归属与目录、异常日志、转换完整性、语法、临时副本应用、重复应用和恢复均通过。实际插件未修改。`);
+  console.log(`官方 ${plan.extensionVersion} 兼容结构校验通过：${plan.compatibility.family}；推理摘要分类、原生展开／折叠与流式正文、开关恢复、动态资源、宿主初始化、SSH / WSL 边界、项目首条消息归属与目录、语法、临时副本应用、已安装补丁更新、重复应用和恢复均通过。实际插件未修改。`);
 } finally { await fs.rm(fixture, { recursive: true, force: true }); }
