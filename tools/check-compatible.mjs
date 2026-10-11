@@ -77,7 +77,7 @@ context.require = () => { throw new Error('host-load-regression'); };
 assert.equal(injectedEntry.runInContext(context, { timeout: 1000 }), undefined);
 assert.match(warnings.at(-1), /host-load-regression/, '宿主加载失败必须记录实际异常');
 assert.equal((route.match(/projectRoute\(/g) ?? []).length, 1);
-assert.equal((route.match(/vclDraftKey/g) ?? []).length, 13);
+assert.equal((route.match(/vclDraftKey/g) ?? []).length, 16);
 assert.equal((composer.match(/projectCwd\(/g) ?? []).length, 5);
 assert.equal((composer.match(/validateProject\(/g) ?? []).length, 1);
 assert.equal((header.match(/data-vcl-home-history/g) ?? []).length, 2);
