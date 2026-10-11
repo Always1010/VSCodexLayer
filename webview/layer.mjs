@@ -701,7 +701,7 @@ class Navigation {
     return changed;
   }
   queueEdits(edits) {
-    if (this.disposed || !edits.length) return;
+    if (this.disposed || this.disabling || !edits.length) return;
     this.pendingEdits.push(...edits);
     clearTimeout(this.saveTimer); this.saveTimer = setTimeout(() => {
       this.flushState().catch((error) => this.showError(error));
@@ -725,16 +725,28 @@ class Navigation {
     return this.savePromise;
   }
   persist() {
-    if (this.disposed) return;
+    if (this.disposed || this.disabling) return;
     const next = { ...this.state, groups: [...this.closed] };
     const edits = navigationEdits(this.editBase, next);
     this.editBase = structuredClone(next); this.queueEdits(edits);
   }
   async disable() {
-    this.state.unread = [...this.activity.unread];
-    try { await this.client.request('save-state', { operations: [{ type: 'set', key: 'disabled', value: true }] }); }
-    catch (error) { this.showError(error); return; }
-    this.dispose(); showLauncher('启用项目导航');
+    if (this.disposed || this.disabling) return;
+    this.persist(); this.disabling = true; clearTimeout(this.saveTimer);
+    if (this.rail) { this.rail.inert = true; this.rail.setAttribute('aria-busy', 'true'); }
+    try {
+      await this.flushState();
+      if (this.disposed) return;
+      const result = await this.client.request('save-state', { operations: [{ type: 'set', key: 'disabled', value: true }] });
+      if (this.disposed) return;
+      this.applyState(result.state); this.dispose(); showLauncher('启用项目导航');
+    } catch (error) {
+      this.disabling = false;
+      if (!this.disposed) {
+        if (this.rail) { this.rail.inert = false; this.rail.removeAttribute('aria-busy'); }
+        this.render(); this.showError(error);
+      }
+    }
   }
   dispose() {
     if (this.disposed) return;
