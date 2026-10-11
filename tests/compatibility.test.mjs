@@ -10,15 +10,35 @@ import { findExtension } from '../tools/layer.mjs';
 import { patchReasoningActivity, patchReasoningRenderer, patchReadTarget } from '../adapters/reasoning.mjs';
 import { patchProjectDraftReset } from '../adapters/draft-lifecycle.mjs';
 import { checkNativeDraftLifecycle } from '../tools/native-draft-lifecycle.mjs';
-import { archiveDependencies } from '../adapters/chat-menu.mjs';
+import { archiveDependencies, patchMenuHeader, validateHeaderImports } from '../adapters/chat-menu.mjs';
 
 test('原生归档恢复接入缺失或歧义时拒绝生成补丁', () => {
   const source = 'import{a as scope,b as atom,c as service,d as pins,e as OpenError}from"./native.js";'
     + 'function footer(){let store=scope(atom);await service(store,host).unarchiveConversation(id,{useAppServerPins:store.get(pins)});'
     + 'error instanceof OpenError}export{init as n,footer as t};';
   assert.equal(archiveDependencies(source).service.exported, 'c');
+  assert.equal(archiveDependencies(source).initializer, 'n', '导入必须使用公开导出名，不能使用内部函数名');
   assert.throws(() => archiveDependencies(source.replace('unarchiveConversation', 'other')), /数量异常：0/);
   assert.throws(() => archiveDependencies(source + source), /数量异常：2/);
+});
+
+test('菜单桥导入核对实际导出，阻止归档模块缺少导出导致聊天页面崩溃', async () => {
+  const archiveSource = 'import{a as scope,b as atom,c as service,d as pins,e as OpenError}from"./native.js";'
+    + 'function footer(){let store=scope(atom);await service(store,host).unarchiveConversation(id,{useAppServerPins:store.get(pins)});'
+    + 'error instanceof OpenError}export{B as n,footer as t};';
+  const options = { menuPath: 'menu.js', menu: { initializer: 'n', componentExport: 't',
+    react: { exported: 'react', file: './native.js' }, jsx: { exported: 'jsx', file: './native.js' } },
+    dom: { exported: 'dom', file: './native.js' }, archive: { path: 'archive.js', ...archiveDependencies(archiveSource) } };
+  const modules = { './menu.js': 'export{init as n,menu as t};', './archive.js': archiveSource,
+    './native.js': 'export{scope as a,atom as b,service as c,pins as d,OpenError as e,R as react,J as jsx,D as dom};' };
+  const read = async (file) => { assert.ok(file in modules); return modules[file]; };
+  const header = patchMenuHeader('function header(){}export{header as t};', options);
+  await validateHeaderImports(header, read);
+  const broken = patchMenuHeader('function header(){}export{header as t};',
+    { ...options, archive: { ...options.archive, initializer: 'B' } });
+  await assert.rejects(validateHeaderImports(broken, read), /archive\.js → B/);
+  modules['./native.js'] = modules['./native.js'].replace('service as c,', '');
+  await assert.rejects(validateHeaderImports(header, read), /native\.js → c/);
 });
 
 test('项目连续创建聊天后身份独立，结构不匹配时拒绝补丁', () => {
