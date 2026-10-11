@@ -32,11 +32,11 @@ export function projectName(cwd) {
   return parts.at(-1) || normalized;
 }
 
-function compareThreads(a, b) {
+function compareThreads(a, b, newestFirst = true) {
   const knownA = Number.isFinite(a.createdAt) && a.createdAt > 0;
   const knownB = Number.isFinite(b.createdAt) && b.createdAt > 0;
   return Number(knownB) - Number(knownA)
-    || (knownA && knownB ? a.createdAt - b.createdAt : 0)
+    || (knownA && knownB ? (newestFirst ? b.createdAt - a.createdAt : a.createdAt - b.createdAt) : 0)
     || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
 }
 
@@ -79,7 +79,7 @@ export function groupThreads(threads, folders = [], { mode = 'all', query = '', 
       const projectMatches = !term || `${group.name} ${group.path ?? ''}`.toLocaleLowerCase().includes(term);
       const visible = projectMatches ? group.threads : group.threads.filter((thread) => thread.title.toLocaleLowerCase().includes(term));
       return { ...group, registered: registered.has(group.key), pinned: pins.has(group.key), total: group.threads.length,
-        threads: [...visible].sort(archived ? (a, b) => (b.updatedAt || 0) - (a.updatedAt || 0) || compareThreads(a, b) : compareThreads) };
+        threads: [...visible].sort(archived ? (a, b) => (b.updatedAt || 0) - (a.updatedAt || 0) || compareThreads(a, b, false) : compareThreads) };
     })
     .filter((group) => !term || `${group.name} ${group.path ?? ''}`.toLocaleLowerCase().includes(term) || group.threads.length)
     .sort((a, b) => Number(b.pinned) - Number(a.pinned)

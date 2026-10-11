@@ -144,6 +144,8 @@ test('归档视图只显示有记录的项目，按更新时间排序并支持�
   const groups = groupThreads(threads, folders, options);
   assert.deepEqual(groups.map((group) => group.path), ['/a/Project', '/b/Project']);
   assert.deepEqual(groups[0].threads.map((thread) => thread.id), ['new', 'old']);
+  const tied = threads.map((thread) => ({ ...thread, updatedAt: 20 }));
+  assert.deepEqual(groupThreads(tied, folders, options)[0].threads.map((thread) => thread.id), ['old', 'new'], '归档更新时间相同仍沿用原有创建时间升序');
   assert.equal(groupThreads(threads, folders, { ...options, mode: 'current' }).length, 1);
   assert.equal(groupThreads(threads, folders, { ...options, query: '/b/Project' })[0].threads[0].id, 'other');
   assert.equal(groupThreads(threads, folders, { ...options, query: '新聊天' })[0].threads[0].id, 'new');
@@ -165,7 +167,7 @@ test('手动项目合并历史、工作区和置顶，移除登记只影响无�
   assert.ok(groupThreads(threads, folders, { pinnedProjects }).every((group) => !group.registered));
 });
 
-test('聊天按创建时间固定，活动、标题、分页顺序和搜索不改变位置', () => {
+test('聊天按创建时间从新到旧固定，活动、标题、分页顺序和搜索不改变位置', () => {
   const threads = [
     { id: 'c', title: '聊天 C', cwd: '/b/Project', createdAt: 30, updatedAt: 30 },
     { id: 'a', title: '聊天 A', cwd: '/b/Project', createdAt: 10, updatedAt: 100 },
@@ -173,12 +175,12 @@ test('聊天按创建时间固定，活动、标题、分页顺序和搜索不�
     { id: 'other', title: '其他', cwd: '/a/Project', createdAt: 1, updatedAt: 1 },
   ];
   const ids = (values, options) => groupThreads(values, [], options).find((group) => group.path === '/b/Project').threads.map((thread) => thread.id);
-  assert.deepEqual(ids(threads), ['a', 'b', 'c']);
+  assert.deepEqual(ids(threads), ['c', 'b', 'a']);
   const changed = threads.map((thread) => thread.id === 'b' ? { ...thread, updatedAt: 9999, status: 'active', title: '聊天 B 改名' } : thread).reverse();
-  assert.deepEqual(ids(changed), ['a', 'b', 'c']);
-  assert.deepEqual(ids(changed, { query: '聊天' }), ['a', 'b', 'c']);
-  assert.deepEqual(ids([...changed, { id: 'd', title: '新增', cwd: '/b/Project', createdAt: 40 }]), ['a', 'b', 'c', 'd']);
-  assert.deepEqual(ids(changed.filter((thread) => thread.id !== 'b')), ['a', 'c']);
+  assert.deepEqual(ids(changed), ['c', 'b', 'a']);
+  assert.deepEqual(ids(changed, { query: '聊天' }), ['c', 'b', 'a']);
+  assert.deepEqual(ids([...changed, { id: 'd', title: '新增', cwd: '/b/Project', createdAt: 40 }]), ['d', 'c', 'b', 'a']);
+  assert.deepEqual(ids(changed.filter((thread) => thread.id !== 'b')), ['c', 'a']);
   assert.deepEqual(groupThreads(changed).map((group) => group.path), ['/a/Project', '/b/Project'], '同名项目按路径固定，不随活动移动');
   const uncertain = [
     { id: 'z', createdAt: 0, updatedAt: 999 }, { id: 'y', createdAt: NaN },

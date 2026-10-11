@@ -553,7 +553,7 @@ try {
       await waitFor(`new URL(mockRoute,location.origin).searchParams.get('vclProjectCwd')==='D:/Else/Project'`);
     }
   }
-  await assertBrowser(`JSON.stringify([...document.querySelector('[data-vcl-key="project:d:/else/project"]').closest('.vcl-project').querySelectorAll('.vcl-thread')].map(node=>node.dataset.vclKey))===JSON.stringify(['thread:sent-thread-3','thread:sent-thread-4','thread:sent-thread-5'])`, '新项目连续聊天没有按创建顺序追加');
+  await assertBrowser(`JSON.stringify([...document.querySelector('[data-vcl-key="project:d:/else/project"]').closest('.vcl-project').querySelectorAll('.vcl-thread')].map(node=>node.dataset.vclKey))===JSON.stringify(['thread:sent-thread-5','thread:sent-thread-4','thread:sent-thread-3'])`, '新项目连续聊天没有按创建时间从新到旧排列');
   for (let index = 3; index <= 5; index += 1) {
     await evaluate(`document.querySelector('[data-vcl-key="thread:sent-thread-${index}"]').click()`);
     await waitFor(`mockRoute==='/local/sent-thread-${index}'`);
