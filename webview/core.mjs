@@ -67,6 +67,30 @@ export function routeThreadId(route) {
   return match?.[1] ?? null;
 }
 
+export class ThreadActivity {
+  constructor(unread = []) {
+    this.unread = new Set(unread);
+    this.statuses = new Map();
+  }
+  receive(event) {
+    if (event?.type !== 'thread-activity' || typeof event.threadId !== 'string') return false;
+    this.statuses.set(event.threadId, { status: event.status, activeFlags: event.activeFlags ?? [] });
+    if (event.phase === 'started') this.unread.delete(event.threadId);
+    if (event.phase === 'completed') this.unread.add(event.threadId);
+    return true;
+  }
+  acknowledge(threadId) { return this.unread.delete(threadId); }
+  indicator(thread) {
+    const { status, activeFlags = [] } = this.statuses.get(thread.id) ?? thread;
+    if (status === 'active' && activeFlags.includes('waitingOnApproval')) return { kind: 'attention', label: '等待审批' };
+    if (status === 'active' && activeFlags.includes('waitingOnUserInput')) return { kind: 'attention', label: '等待你的输入' };
+    if (status === 'systemError') return { kind: 'attention', label: '运行出错，需要查看' };
+    if (this.unread.has(thread.id)) return { kind: 'attention', label: '本轮已结束，点击查看' };
+    if (status === 'active' || status === 'running') return { kind: 'running', label: '正在运行' };
+    return null;
+  }
+}
+
 export async function loadAllThreads(fetchPage, { signal, onPage = () => {} } = {}) {
   const threads = new Map();
   const cursors = new Set();

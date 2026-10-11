@@ -10,18 +10,20 @@ function fixture(platform = process.platform) {
   const messages = [];
   const requests = [];
   let callbacks;
+  let notify;
   const responses = new Map();
   const connection = {
     registerProvider(_name, value) { callbacks = value; return { dispose() {} }; },
-    registerInternalNotificationHandler() { return { dispose() {} }; },
+    registerInternalNotificationHandler(handler) { notify = handler; return { dispose() {} }; },
     abandonRequest() {},
     sendRequest(...args) { requests.push(args); },
   };
   const target = { postMessage(message) { messages.push(message); responses.get(message.id)?.(message); responses.delete(message.id); } };
   const extensionUri = { scheme: 'file', fsPath: path.resolve('official-extension') };
   const extension = { extensionKind: 2, extensionUri };
+  let state = { mode: 'current', width: 280 };
   const provider = { codexMcpConnection: connection, extensionVersion: 'test', extensionUri,
-    globalState: { async get() { return { mode: 'current', width: 280 }; }, async update() {} },
+    globalState: { async get() { return state; }, async update(_key, value) { state = value; } },
     postMessageToWebview(view, message) { assert.equal(view, target); messages.push(message); } };
   const vscode = { env: {}, ExtensionKind: { UI: 1, Workspace: 2 }, extensions: { getExtension: () => extension },
     workspace: { workspaceFolders: [{ name: 'Project', uri: { scheme: 'file', fsPath: 'D:\\Project' } }],
@@ -29,9 +31,40 @@ function fixture(platform = process.platform) {
   const host = createLayerHost({ vscode, provider, webview: target, onDispose() { return { dispose() {} }; }, isWsl: () => false, platform });
   const send = (method, params = {}) => host.handle({ type: 'vscodex-layer/request', id: method, method, params });
   const request = (method, params) => new Promise((resolve) => { responses.set(method, resolve); send(method, params); });
-  return { host, vscode, extension, messages, requests, send, request, callbacks: () => callbacks };
+  return { host, vscode, extension, messages, requests, send, request, callbacks: () => callbacks, notify: (message) => notify(message) };
 }
 const flush = () => new Promise((resolve) => setImmediate(resolve));
+
+test('审批和输入状态保留，结束事件只转发导航所需字段', async (t) => {
+  const f = fixture(); t.after(() => f.host.dispose());
+  const pending = f.request('list'); await flush();
+  f.callbacks().onResult({ id: f.requests.at(-1)[1], result: { data: [{ id: 'one',
+    status: { type: 'active', activeFlags: ['waitingOnApproval', 'waitingOnUserInput', 'unknown'] } }], nextCursor: null } });
+  assert.deepEqual((await pending).result.data[0].activeFlags, ['waitingOnApproval', 'waitingOnUserInput']);
+  for (const [method, params, expected] of [
+    ['thread/status/changed', { threadId: 'one', status: { type: 'active', activeFlags: ['waitingOnUserInput'] } },
+      { phase: 'status', status: 'active', activeFlags: ['waitingOnUserInput'] }],
+    ['turn/started', { threadId: 'one', turn: { id: 'turn', items: ['secret'] } },
+      { phase: 'started', status: 'active', activeFlags: [] }],
+    ['turn/completed', { threadId: 'one', turn: { status: 'completed', items: ['secret'] } },
+      { phase: 'completed', status: 'idle', activeFlags: [] }],
+    ['turn/completed', { threadId: 'one', turn: { status: 'failed', error: 'secret' } },
+      { phase: 'completed', status: 'systemError', activeFlags: [] }],
+  ]) {
+    f.messages.length = 0; f.notify({ method, params });
+    assert.deepEqual(f.messages, [
+      { type: 'vscodex-layer/event', event: { type: 'thread-activity', threadId: 'one', ...expected } },
+      { type: 'vscodex-layer/event', event: 'threads-changed' },
+    ]);
+  }
+  const state = (await f.request('init')).result.state;
+  assert.deepEqual(state.unread, []);
+  await f.request('save-state', { state: { unread: ['one', '../invalid', null, 'x'.repeat(201)] } });
+  assert.deepEqual((await f.request('init')).result.state.unread, ['one']);
+  f.messages.length = 0;
+  f.notify({ method: 'thread/status/changed', params: { threadId: '../invalid' } });
+  assert.equal(f.messages.some((message) => typeof message.event === 'object'), false);
+});
 
 test('同面板导航，只读取聊天摘要，不接管官方消息', async (t) => {
   const f = fixture(); t.after(() => f.host.dispose());

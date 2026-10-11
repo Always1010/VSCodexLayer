@@ -1,6 +1,35 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { normalizePath, projectName, groupThreads, routeThreadId, loadAllThreads } from '../webview/core.mjs';
+import { normalizePath, projectName, groupThreads, routeThreadId, loadAllThreads, ThreadActivity } from '../webview/core.mjs';
+
+test('提醒优先于运行，结束提示保留至查看，新轮次清除旧提示', () => {
+  const activity = new ThreadActivity();
+  const thread = { id: 'current', status: 'idle' };
+  assert.equal(activity.indicator(thread), null, '历史空闲线程不能一律视为未读');
+  const event = (phase, status, activeFlags = []) => activity.receive({ type: 'thread-activity', threadId: thread.id, phase, status, activeFlags });
+  event('started', 'active');
+  assert.equal(activity.indicator(thread).kind, 'running');
+  for (const flag of ['waitingOnApproval', 'waitingOnUserInput']) {
+    event('status', 'active', [flag]);
+    assert.equal(activity.indicator(thread).kind, 'attention');
+    activity.acknowledge(thread.id);
+    assert.equal(activity.indicator(thread).kind, 'attention', '查看不能消除尚未处理的提醒');
+  }
+  event('status', 'active');
+  assert.equal(activity.indicator(thread).kind, 'running');
+  event('completed', 'idle');
+  assert.equal(activity.indicator({ ...thread, status: 'active' }).kind, 'attention', '旧分页结果不能覆盖实时结束状态');
+  event('status', 'notLoaded');
+  assert.equal(activity.indicator(thread).kind, 'attention', '状态刷新不能消除结束提示');
+  const restored = new ThreadActivity([...activity.unread]);
+  assert.equal(restored.indicator(thread).kind, 'attention');
+  assert.equal(restored.acknowledge(thread.id), true);
+  assert.equal(restored.indicator(thread), null);
+  event('started', 'active');
+  assert.equal(activity.unread.size, 0);
+  event('completed', 'systemError');
+  assert.equal(activity.indicator(thread).label, '运行出错，需要查看');
+});
 
 test('Windows 路径规范化、同名项目和多根当前项目正确区分', () => {
   assert.equal(normalizePath('D:\\WRK\\Project\\'), normalizePath('file:///d:/WRK/Project'));

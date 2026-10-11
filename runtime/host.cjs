@@ -15,7 +15,14 @@ function cleanState(value = {}) {
     collapsed: typeof value.collapsed === 'boolean' ? value.collapsed : null,
     groups: Array.isArray(value.groups) ? value.groups.filter((item) => typeof item === 'string' && item.length <= 4096).slice(0, 2000) : [],
     disabled: value.disabled === true,
+    unread: Array.isArray(value.unread) ? value.unread.filter((id) => typeof id === 'string' && /^[\w-]{1,200}$/.test(id)).slice(-2000) : [],
   };
+}
+
+function activityStatus(status) {
+  return { status: typeof status?.type === 'string' ? status.type : 'notLoaded',
+    activeFlags: Array.isArray(status?.activeFlags) ? status.activeFlags.filter((flag) =>
+      flag === 'waitingOnApproval' || flag === 'waitingOnUserInput') : [] };
 }
 
 function summary(thread) {
@@ -24,7 +31,7 @@ function summary(thread) {
   return { id: thread.id, title: String(thread.name || thread.preview || '未命名聊天').replace(/\s+/g, ' ').slice(0, 200),
     cwd: typeof thread.cwd === 'string' ? thread.cwd : null,
     createdAt: Number(thread.createdAt) || 0, updatedAt: Number(thread.updatedAt) || 0,
-    status: typeof thread.status?.type === 'string' ? thread.status.type : 'notLoaded' };
+    ...activityStatus(thread.status) };
 }
 
 function workspaceSupport(vscode, provider, isWsl, platform) {
@@ -150,8 +157,21 @@ exports.createLayerHost = function createLayerHost({ vscode, provider, webview, 
     throw new Error('不支持的增强操作。');
   }
   const changedMethods = new Set(['thread/started', 'thread/name/updated', 'thread/archived', 'thread/unarchived',
-    'thread/status/changed', 'thread/metadata/updated', 'turn/completed']);
+    'thread/status/changed', 'thread/metadata/updated', 'turn/started', 'turn/completed']);
   disposables.push(provider.codexMcpConnection.registerInternalNotificationHandler((notification) => {
+    const { method, params = {} } = notification;
+    const threadId = method === 'thread/started' ? params.thread?.id : params.threadId;
+    if (typeof threadId === 'string' && /^[\w-]{1,200}$/.test(threadId)) {
+      let event;
+      if (method === 'thread/status/changed' || method === 'thread/started') {
+        event = { type: 'thread-activity', threadId, phase: 'status',
+          ...activityStatus(method === 'thread/started' ? params.thread.status : params.status) };
+      } else if (method === 'turn/started' || method === 'turn/completed') {
+        event = { type: 'thread-activity', threadId, phase: method === 'turn/started' ? 'started' : 'completed',
+          status: method === 'turn/started' ? 'active' : params.turn?.status === 'failed' ? 'systemError' : 'idle', activeFlags: [] };
+      }
+      if (event) post({ type: EVENT, event });
+    }
     if (changedMethods.has(notification.method)) post({ type: EVENT, event: 'threads-changed' });
   }));
   disposables.push(vscode.workspace.onDidChangeWorkspaceFolders(() => post({ type: EVENT, event: 'workspace-changed' })));

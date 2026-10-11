@@ -77,6 +77,7 @@ body.vcl-enabled > #root {
 #vcl-navigation .vcl-thread { padding-inline-start: 36px; font-size: 12px; }
 #vcl-navigation .vcl-selected { background: var(--vcl-selected); color: var(--vscode-list-inactiveSelectionForeground, var(--vcl-fg)); }
 #vcl-navigation .vcl-activity { width: 6px; height: 6px; flex: 0 0 6px; border-radius: 50%; background: var(--vscode-testing-runAction, #2c9b55); }
+#vcl-navigation .vcl-attention { width: 8px; height: 8px; flex-basis: 8px; background: #3794ff; }
 #vcl-navigation .vcl-empty-project { padding: 5px 6px 8px 36px; color: var(--vcl-muted); font-size: 12px; }
 #vcl-navigation .vcl-empty { padding: 22px 12px; text-align: center; color: var(--vcl-muted); }
 #vcl-navigation .vcl-footer { min-height: 36px; display: flex; align-items: center; justify-content: space-between; padding: 4px 8px 4px 12px; border-top: 1px solid var(--vcl-border); }
