@@ -1,3 +1,4 @@
+import { syntaxType, validateGeneratedCode } from '../lib/plan-syntax.mjs';
 import fs from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { extensionRoot, readOriginal } from '../lib/patch-engine.mjs';
@@ -147,6 +148,7 @@ export async function buildPatchPlan(directory) {
     originals.push({ path: target, originalHash: null,
       content: await fs.readFile(fileURLToPath(new URL(`../${source}`, import.meta.url))) });
   }
-  return { adapter: ADAPTER, extensionVersion: VERSION, files: originals,
-    compatibility: { reasoning: reasoning.compatibility, chatMenu: menu.compatibility } };
+  for (const entry of originals) entry.syntax = syntaxType(entry.path);
+  return validateGeneratedCode({ adapter: ADAPTER, extensionVersion: VERSION, files: originals,
+    compatibility: { reasoning: reasoning.compatibility, chatMenu: menu.compatibility } });
 }
