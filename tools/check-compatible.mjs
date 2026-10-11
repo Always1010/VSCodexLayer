@@ -60,7 +60,7 @@ try {
     vscode.env.remoteName = remoteName;
     backendInWsl = wsl;
     vscode.workspace.workspaceFolders = remoteName === 'ssh-remote'
-      ? [{ name: 'Remote', uri: { scheme: 'vscode-remote', authority: 'ssh-remote+rock5b', fsPath: '/home/ubuntu/project' } }]
+      ? [{ name: 'Remote', uri: { scheme: 'file', authority: '', fsPath: '/home/ubuntu/project' } }]
       : [];
     assert.equal(initializedHost.handle({ type: 'vscodex-layer/request', id: 'init', method: 'init' }), true);
     await new Promise((resolve) => setImmediate(resolve));

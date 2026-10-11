@@ -45,9 +45,12 @@ function workspaceSupport(vscode, provider, isWsl, platform) {
     || path.resolve(provider.extensionUri.fsPath) !== path.resolve(extension.extensionUri.fsPath)) {
     return unsupported('Remote SSH 项目导航需要 Codex 扩展运行在远程 Linux 工作区宿主。');
   }
-  const authorities = new Set(folders.map(({ uri }) => uri.authority));
-  if (!folders.every(({ uri }) => uri.scheme === 'vscode-remote' && uri.authority?.startsWith('ssh-remote+'))
-    || authorities.size > 1) return unsupported('Remote SSH 工作区必须使用同一 SSH 主机的远程目录。');
+  // VS Code transforms SSH URIs into host-local file URIs before delivering them
+  // to the remote extension host. Client-local files become vscode-local instead.
+  if (!folders.every(({ uri }) => uri.scheme === 'file' && !uri.authority
+    && typeof uri.fsPath === 'string' && path.posix.isAbsolute(uri.fsPath))) {
+    return unsupported('Remote SSH 工作区必须使用当前远程宿主的文件目录。');
+  }
   return { supported: true, mode: 'ssh-remote', reason: null };
 }
 

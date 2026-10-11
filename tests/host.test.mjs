@@ -58,12 +58,12 @@ test('同面板导航，只读取聊天摘要，不接管官方消息', async (t
 });
 
 test('不支持的远程工作区和无效路由被拒绝', async (t) => {
-  const f = fixture(); t.after(() => f.host.dispose());
+  const f = fixture('linux'); t.after(() => f.host.dispose());
   f.vscode.env.remoteName = 'ssh-remote';
   f.send('init'); await flush();
   assert.equal(f.messages.at(-1).result.supported, false);
   f.send('list'); await flush();
-  assert.match(f.messages.at(-1).error, /同一 SSH 主机/);
+  assert.match(f.messages.at(-1).error, /当前远程宿主/);
   f.vscode.env.remoteName = undefined;
   f.send('navigate', { threadId: '../settings' }); await flush();
   assert.match(f.messages.at(-1).error, /编号无效/);
@@ -102,7 +102,8 @@ test('项目新聊天绑定完整目录，不创建线程，失效目录拒绝�
   await fs.rmdir(other);
   assert.match((await f.request('validate-project', { cwd: other })).error, /不存在或无法访问/);
   f.vscode.env.remoteName = 'ssh-remote';
-  assert.match((await f.request('new-project-chat', { cwd: current, path: '/' })).error, /同一 SSH 主机/);
+  f.vscode.workspace.workspaceFolders = [{ name: 'Client', uri: { scheme: 'vscode-local', fsPath: current } }];
+  assert.match((await f.request('new-project-chat', { cwd: current, path: '/' })).error, /当前远程宿主|远程 Linux/);
 });
 
 test('Linux SSH 宿主读取同主机聊天并校验远程目录，错误宿主拒绝请求', async (t) => {
@@ -110,12 +111,15 @@ test('Linux SSH 宿主读取同主机聊天并校验远程目录，错误宿主�
   t.after(() => fs.rm(directory, { recursive: true, force: true }));
   const f = fixture('linux'); t.after(() => f.host.dispose());
   f.vscode.env.remoteName = 'ssh-remote';
-  const remoteFolder = { name: 'Remote', uri: { scheme: 'vscode-remote', authority: 'ssh-remote+rock5b', fsPath: directory } };
+  const remoteFolder = { name: 'Remote', uri: { scheme: 'file', authority: '', fsPath: directory } };
   f.vscode.workspace.workspaceFolders = [remoteFolder];
   const init = (await f.request('init')).result;
   assert.equal(init.supported, true);
   assert.equal(init.mode, 'ssh-remote');
   assert.equal(init.folders[0].path, directory);
+  f.vscode.workspace.workspaceFolders = [remoteFolder,
+    { name: 'Other', uri: { scheme: 'file', authority: '', fsPath: path.join(directory, 'other') } }];
+  assert.equal((await f.request('init')).result.supported, true, '同一远程宿主的多根 file 工作区必须受支持');
   const reply = await f.request('new-project-chat', { cwd: directory, path: '/' });
   assert.equal(reply.result.cwd, directory);
   assert.equal(f.requests.length, 0, '打开 SSH 项目草稿不创建线程');
@@ -127,13 +131,22 @@ test('Linux SSH 宿主读取同主机聊天并校验远程目录，错误宿主�
   assert.ok((await f.request('validate-project', { cwd: 'D:\\Project' })).error);
   await fs.rmdir(directory);
   assert.match((await f.request('validate-project', { cwd: directory })).error, /不存在或无法访问/);
+  const extensionUri = f.extension.extensionUri;
   for (const mutate of [
     () => { f.extension.extensionKind = 1; },
     () => { f.extension.extensionKind = 2; f.vscode.workspace.workspaceFolders = [remoteFolder,
-      { ...remoteFolder, uri: { ...remoteFolder.uri, authority: 'ssh-remote+other' } }]; },
+      { ...remoteFolder, uri: { ...remoteFolder.uri, scheme: 'vscode-local' } }]; },
+    () => { f.vscode.workspace.workspaceFolders = [{ ...remoteFolder, uri: { ...remoteFolder.uri, scheme: 'memfs' } }]; },
+    () => { f.vscode.workspace.workspaceFolders = [{ ...remoteFolder, uri: { ...remoteFolder.uri, authority: 'other' } }]; },
+    () => { f.vscode.workspace.workspaceFolders = [{ ...remoteFolder, uri: { ...remoteFolder.uri, fsPath: 'relative' } }]; },
+    () => { f.vscode.workspace.workspaceFolders = [remoteFolder]; f.extension.extensionUri = { scheme: 'file', fsPath: path.join(directory, 'wrong-extension') }; },
     () => { f.vscode.env.remoteName = 'dev-container'; },
     () => { f.vscode.env.remoteName = 'wsl'; },
   ]) {
+    f.vscode.env.remoteName = 'ssh-remote';
+    f.vscode.workspace.workspaceFolders = [remoteFolder];
+    f.extension.extensionKind = 2;
+    f.extension.extensionUri = extensionUri;
     mutate();
     assert.equal((await f.request('init')).result.supported, false);
     const before = f.requests.length;
