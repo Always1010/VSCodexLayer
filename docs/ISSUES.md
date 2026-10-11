@@ -35,9 +35,9 @@
 ## ISSUE-004：Remote SSH 工作区被误判为不支持
 
 - 日期：2026-10-11
-- 状态：已解决（仓库修复；已安装补丁待更新）
+- 状态：已解决（已更新远程插件补丁）
 - 现象：Linux ARM64 官方插件补丁已应用且结构检查通过，但真实 Remote SSH 工作区无法启用项目导航。
 - 原因：宿主检查错误地要求工作区 URI 为 `vscode-remote:` 并携带 SSH authority；已安装 VS Code Server 的 URI 转换器会先将 SSH URI 转为无 authority 的 `file:` URI 再传给远程扩展。原模拟检查沿用了客户端 URI，遗漏真实宿主形态。
 - 解决方案：在 Linux Workspace 扩展及插件目录身份检查通过后，接受当前宿主的绝对 `file:` 目录；拒绝客户端 `vscode-local:`、虚拟 URI、非空 authority 和相对路径。接入检查同步使用真实远程宿主 URI。
-- 验证：4 项宿主回归测试及当前 Linux ARM64 插件临时副本接入检查通过；提取已安装 VS Code Server 的真实 URI 转换器后执行同一初始化请求，已安装旧补丁返回 `supported: false`，仓库修复返回 `supported: true`。实际插件更新和真实窗口验收尚未进行。
+- 验证：4 项宿主回归测试及当前 Linux ARM64 插件临时副本接入检查通过；提取已安装 VS Code Server 的真实 URI 转换器后执行同一初始化请求，旧补丁返回 `supported: false`，仓库修复返回 `supported: true`。用户关闭 VS Code 并授权后，已更新远程 `26.51007.21434-linux-arm64` 插件补丁；11 个补丁文件与当前计划一致，已安装宿主初始化返回 `supported: true`、`mode: ssh-remote`。真实窗口验收待重新连接后进行。
 - 相关文件：`runtime/host.cjs`、`tests/host.test.mjs`、`tools/check-compatible.mjs`、`docs/USAGE.md`。
