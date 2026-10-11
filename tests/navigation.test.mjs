@@ -131,6 +131,23 @@ test('项目置顶顺序稳定，空项目保留并遵循当前筛选和搜索',
     { path: 'd:\\Project\\', name: 'Duplicate' }] }).length, 1, 'Windows 同目录不得重复置顶');
 });
 
+test('归档视图只显示有记录的项目，按更新时间排序并支持目录和标题搜索', () => {
+  const threads = [
+    { id: 'old', title: '旧聊天', cwd: '/a/Project', createdAt: 1, updatedAt: 10 },
+    { id: 'new', title: '新聊天', cwd: '/a/Project', createdAt: 2, updatedAt: 20 },
+    { id: 'other', title: '其他聊天', cwd: '/b/Project', updatedAt: 30 },
+  ];
+  const folders = [{ path: '/a/Project' }, { path: '/empty' }];
+  const options = { archived: true };
+  const groups = groupThreads(threads, folders, options);
+  assert.deepEqual(groups.map((group) => group.path), ['/a/Project', '/b/Project']);
+  assert.deepEqual(groups[0].threads.map((thread) => thread.id), ['new', 'old']);
+  assert.equal(groupThreads(threads, folders, { ...options, mode: 'current' }).length, 1);
+  assert.equal(groupThreads(threads, folders, { ...options, query: '/b/Project' })[0].threads[0].id, 'other');
+  assert.equal(groupThreads(threads, folders, { ...options, query: '新聊天' })[0].threads[0].id, 'new');
+  assert.equal(groupThreads([], folders, options).length, 0);
+});
+
 test('手动项目合并历史、工作区和置顶，移除登记只影响无其他来源的空项目', () => {
   const threads = [{ id: 'a', title: '历史', cwd: '/a/Project', createdAt: 1 }];
   const folders = [{ name: 'Current', path: '/current' }];

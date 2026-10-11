@@ -8,7 +8,8 @@ import { fileURLToPath } from 'node:url';
 const root = fileURLToPath(new URL('../', import.meta.url));
 const readingOnly = process.argv.length === 3 && process.argv[2] === '--reading';
 const reasoningOnly = process.argv.length === 3 && process.argv[2] === '--reasoning';
-if (process.argv.length > 2 && !readingOnly && !reasoningOnly) throw new Error('用法：node tools/check-ui.mjs [--reading|--reasoning]');
+const archiveOnly = process.argv.length === 3 && process.argv[2] === '--archive';
+if (process.argv.length > 2 && !readingOnly && !reasoningOnly && !archiveOnly) throw new Error('用法：node tools/check-ui.mjs [--reading|--reasoning|--archive]');
 const output = path.join(root, '.scratch', 'ui');
 await fs.mkdir(output, { recursive: true });
 const executable = [
@@ -40,7 +41,7 @@ window.mockSubmit=async success=>{if(!success)return;const url=new URL(mockRoute
 window.acquireVsCodeApi=()=>{if(acquired)throw Error('API acquired twice');acquired=true;let state={draft:'未发送的草稿'};return{getState:()=>state,setState:value=>(state=value),postMessage(message){
 if(message.type!=='vscodex-layer/request')return;mockRequests.push(message);let result,error;
 if(message.method==='init')result={supported:true,mode:'local',registry:structuredClone(mockRegistry),folders:[{name:'VSCodexLayer',path:'D:/WRK/VSCodexLayer'}],state:mockState,version:'mock'};
-else if(message.method==='list'){const first=message.params.cursor==null;result={data:mockThreads.slice(first?0:50,first?50:undefined),nextCursor:first?'page-2':null}}
+else if(message.method==='list'){const first=message.params.cursor==null;const list=message.params.archived?mockArchivedThreads:mockThreads;result={data:structuredClone(list.slice(first?0:50,first?50:undefined)),nextCursor:first&&list.length>50?'page-2':null};if(message.params.archived&&mockArchiveListFailure)error='归档列表读取失败'}
 else if(message.method==='save-state'){mockState=structuredClone(message.params.state);result={saved:true}}
 else if(message.method==='navigate'){mockNavigate('/local/'+message.params.threadId);result={threadId:message.params.threadId}}
 else if(message.method==='validate-project'){if(mockUnavailable.has(message.params.cwd))error='项目目录不存在或无法访问';else result={cwd:message.params.cwd}}
@@ -54,7 +55,8 @@ else if(message.method==='add-project'||message.method==='remove-project'){
  else{const changed=add?index<0:index>=0;if(changed){if(add)mockRegistry.projects.push({path:cwd});else mockRegistry.projects.splice(index,1);mockRegistry.revision++;window.postMessage({type:'vscodex-layer/event',event:{type:'projects-changed',...structuredClone(mockRegistry)}},location.origin)}result={...structuredClone(mockRegistry),cwd,changed}}
 }
 
-setTimeout(()=>window.postMessage({type:'vscodex-layer/response',id:message.id,result,error},location.origin),0)
+const respond=()=>window.postMessage({type:'vscodex-layer/response',id:message.id,result,error},location.origin);
+if(message.method==='list'&&mockHoldView===(message.params.archived?'archived':'active'))mockHeldLists.push(respond);else setTimeout(respond,0)
 }}};
 </script>
 <link rel="stylesheet" href="/webview/layer.css"><script src="/webview/bootstrap.js"></script>
@@ -63,6 +65,17 @@ setTimeout(()=>window.postMessage({type:'vscodex-layer/response',id:message.id,r
 <script type="module">
 window.nativeRoot=document.getElementById('root');window.nativeApi=acquireVsCodeApi();mockNavigate('/');nativeApi.postMessage({type:'ready'});
 window.mockActionCalls=[];window.mockArchiveFailure=false;
+window.mockArchivedThreads=Array.from({length:61},(_,index)=>({id:'archived-'+index,title:'归档聊天 '+index,
+cwd:index<5?'D:/WRK/VSCodexLayer':index===60?null:'D:/Archive/Project',createdAt:1000+index,updatedAt:2000+index}));
+window.mockArchiveListFailure=false;window.mockHoldView=null;window.mockHeldLists=[];
+window.mockRestoreCalls=[];window.mockRestoreFailure=false;window.mockRestoreOpenError=false;window.mockHoldRestore=false;
+__vscodexLayerBridge.registerArchiveActions({}, {restore:async target=>{
+mockRestoreCalls.push(target.id);if(mockHoldRestore)await new Promise(resolve=>window.finishRestore=resolve);
+if(mockRestoreFailure)throw Error('原生恢复失败');
+const thread=mockArchivedThreads.find(thread=>thread.id===target.id);if(thread){mockThreads.push(thread);mockArchivedThreads=mockArchivedThreads.filter(thread=>thread.id!==target.id)}
+window.postMessage({type:'vscodex-layer/event',event:'threads-changed'},location.origin);
+return{restored:true,openable:!mockRestoreOpenError}
+}});
 __vscodexLayerBridge.registerThreadMenuSurface({});
 __vscodexLayerBridge.subscribeThreadMenu(()=>{
   document.querySelector('.mock-native-menu')?.remove();
@@ -81,7 +94,7 @@ __vscodexLayerBridge.subscribeThreadMenu(()=>{
         if(id==='rename-thread'){const chat=mockThreads.find(t=>t.id===target.thread.id);chat.title='重命名后的聊天';window.postMessage({type:'vscodex-layer/event',event:'threads-changed'},location.origin)}
         if(id==='archive-thread'){
           if(mockArchiveFailure){document.getElementById('native-title').textContent='归档失败';return}
-          mockThreads=mockThreads.filter(t=>t.id!==target.thread.id);__vscodexLayerBridge.threadArchived(target.thread.id);
+          mockArchivedThreads.push(mockThreads.find(t=>t.id===target.thread.id));mockThreads=mockThreads.filter(t=>t.id!==target.thread.id);__vscodexLayerBridge.threadArchived(target.thread.id);
         }
       };menu.append(button);
     }
@@ -165,7 +178,71 @@ try {
   await send('Emulation.setDeviceMetricsOverride', { width: 1100, height: 800, deviceScaleFactor: 1, mobile: false }, sessionId);
   await send('Page.navigate', { url: address }, sessionId);
   await waitFor(`document.querySelector('.vcl-count')?.textContent.includes('63 个聊天')`);
-  if (reasoningOnly) {
+  if (archiveOnly) {
+    await evaluate(`document.querySelector('[data-vcl-key="thread:thread-0"]').click();
+      window.beforeArchiveRoute=mockRoute;document.getElementById('native-composer').value='保留当前草稿';
+      document.querySelector('[data-vcl-key="project:d:/other/project"]').click();
+      document.querySelector('[data-vcl-key="thread:thread-20"]').focus();document.querySelector('.vcl-list').scrollTop=180;
+      window.beforeArchiveScroll=document.querySelector('.vcl-list').scrollTop;
+      mockHoldView='active';document.querySelector('[aria-label="刷新聊天列表"]').click();document.getElementById('vcl-archive').click()`);
+    await waitFor(`document.querySelector('.vcl-count').textContent.includes('61 个已归档聊天')`);
+    await assertBrowser(`mockRoute===beforeArchiveRoute&&document.getElementById('native-composer').value==='保留当前草稿'`, '进入归档切换了聊天或丢失草稿');
+    await assertBrowser(`mockRequests.filter(r=>r.method==='list'&&r.params.archived).some(r=>r.params.cursor==='page-2')`, '归档列表未读取后续分页');
+    await assertBrowser(`!document.querySelector('.vcl-list .vcl-new-chat,.vcl-list .vcl-project-pin,.vcl-list .vcl-activity')&&document.getElementById('vcl-add-project').hidden`, '归档视图出现活动操作或状态');
+    await assertBrowser(`document.querySelector('[data-vcl-key="project:d:/wrk/vscodexlayer"]').closest('.vcl-project').querySelector('.vcl-thread').dataset.vclKey==='thread:archived-4'`, '归档未按最后更新时间排列');
+    await screenshot('navigation-archived.png');
+    await evaluate(`mockHoldView=null;mockHeldLists.splice(0).forEach(respond=>respond())`);
+    await assertBrowser(`document.querySelector('.vcl-heading').textContent==='已归档聊天'&&!document.querySelector('[data-vcl-key="thread:thread-0"]')`, '普通列表迟到响应覆盖了归档视图');
+    await evaluate(`{const search=document.querySelector('.vcl-input');search.value='归档聊天 60';search.dispatchEvent(new Event('input'))}`);
+    await assertBrowser(`document.querySelector('[data-vcl-key="thread:archived-60"]')&&document.querySelector('.vcl-count').textContent.includes('1 个已归档聊天')`, '归档标题搜索失败');
+    await evaluate(`document.getElementById('vcl-archive-back').click()`);
+    await assertBrowser(`document.querySelector('.vcl-list').scrollTop===beforeArchiveScroll&&document.activeElement.dataset.vclKey==='thread:thread-20'&&document.querySelector('[data-vcl-key="project:d:/other/project"]').getAttribute('aria-expanded')==='false'`, '返回普通列表丢失滚动、折叠或键盘焦点');
+    await evaluate(`{const mode=document.getElementById('vcl-mode');mode.value='current';mode.dispatchEvent(new Event('change'));const search=document.querySelector('.vcl-input');search.value='设计';search.dispatchEvent(new Event('input'));document.getElementById('vcl-archive').click()}`);
+    await assertBrowser(`document.getElementById('vcl-mode').value==='all'&&document.querySelector('.vcl-input').value==='归档聊天 60'`, '普通筛选污染归档或归档搜索丢失');
+    await evaluate(`document.querySelector('.vcl-input').value='';document.querySelector('.vcl-input').dispatchEvent(new Event('input'));
+      mockRestoreFailure=true;document.querySelector('[data-vcl-key="restore:archived-4"]').click()`);
+    await waitFor(`document.querySelector('.vcl-project-notice').textContent.includes('原生恢复失败')`);
+    await assertBrowser(`document.querySelector('[data-vcl-key="restore:archived-4"]')&&!document.querySelector('[data-vcl-key="restore:archived-4"]').disabled&&mockRoute===beforeArchiveRoute`, '恢复失败删除记录、无法重试或切换聊天');
+    await evaluate(`mockRestoreFailure=false;mockHoldRestore=true;document.querySelector('[data-vcl-key="restore:archived-4"]').click();document.querySelector('[data-vcl-key="restore:archived-4"]').click()`);
+    await waitFor(`window.finishRestore`);
+    await assertBrowser(`mockRestoreCalls.filter(id=>id==='archived-4').length===2&&document.querySelector('[data-vcl-key="thread:archived-4"]').disabled`, '恢复操作重复提交或未锁定目标行');
+    await evaluate(`mockHoldRestore=false;finishRestore()`);
+    await waitFor(`!document.querySelector('[data-vcl-key="thread:archived-4"]')`);
+    await assertBrowser(`mockRoute===beforeArchiveRoute&&document.querySelector('.vcl-project-notice [aria-label="查看已恢复的聊天"]')`, '仅恢复切换了当前聊天或遗漏查看入口');
+    await evaluate(`document.querySelector('.vcl-project-notice [aria-label="查看已恢复的聊天"]').click()`);
+    await waitFor(`mockRoute==='/local/archived-4'&&document.querySelector('.vcl-heading').textContent==='项目聊天'`);
+    await assertBrowser(`document.getElementById('vcl-mode').value==='current'&&document.querySelector('.vcl-input').value==='设计'`, '查看恢复聊天丢失普通列表筛选');
+    await evaluate(`document.getElementById('vcl-archive').click();mockHoldView='archived';document.querySelector('[aria-label="刷新已归档聊天"]').click()`);
+    await waitFor(`mockHeldLists.length>0`);
+    await evaluate(`document.querySelector('[data-vcl-key="restore:archived-3"]').click()`);
+    await waitFor(`mockRestoreCalls.includes('archived-3')&&!document.querySelector('[data-vcl-key="thread:archived-3"]')`);
+    await evaluate(`mockHoldView=null;mockHeldLists.splice(0).forEach(respond=>respond())`);
+    await waitFor(`document.querySelector('.vcl-count').textContent.includes('59 个已归档聊天')&&!document.querySelector('.vcl-loading')`);
+    await assertBrowser(`!document.querySelector('[data-vcl-key="thread:archived-3"]')`, '恢复前的迟到分页把归档条目重新加回');
+    await evaluate(`mockArchiveListFailure=true;document.querySelector('[aria-label="刷新已归档聊天"]').click()`);
+    await waitFor(`document.querySelector('.vcl-status').textContent.includes('归档列表读取失败')`);
+    await assertBrowser(`document.querySelector('[data-vcl-key="thread:archived-2"]')`, '归档读取失败清空已有列表');
+    await evaluate(`document.getElementById('vcl-archive-back').click()`);
+    await assertBrowser(`!document.querySelector('.vcl-status').textContent.includes('归档列表读取失败')`, '归档读取错误污染普通视图');
+    await evaluate(`mockArchiveListFailure=false;document.getElementById('vcl-archive').click()`);
+    await waitFor(`!document.querySelector('.vcl-loading')&&!document.querySelector('.vcl-status').textContent`);
+    await evaluate(`mockRestoreOpenError=true;document.querySelector('[data-vcl-key="thread:archived-2"]').click()`);
+    await waitFor(`document.querySelector('.vcl-project-notice').textContent.includes('原生聊天加载失败')`);
+    await assertBrowser(`!document.querySelector('[data-vcl-key="thread:archived-2"]')&&mockRoute==='/local/archived-4'`, '部分恢复被误报失败或加载失败仍切换聊天');
+    await evaluate(`mockRestoreOpenError=false;document.querySelector('[data-vcl-key="thread:archived-1"]').click()`);
+    await waitFor(`mockRoute==='/local/archived-1'&&document.querySelector('.vcl-heading').textContent==='项目聊天'`);
+    await evaluate(`document.getElementById('vcl-archive').click();document.querySelector('[aria-label="返回原版界面"]').click()`);
+    await waitFor(`document.getElementById('vcl-launcher')`);
+    await evaluate(`document.getElementById('vcl-launcher').click()`);
+    await waitFor(`document.querySelector('.vcl-heading').textContent==='项目聊天'`);
+    await assertBrowser(`!document.getElementById('vcl-archive').hidden`, '重开面板没有默认返回普通聊天');
+    await evaluate(`document.getElementById('vcl-archive').click()`);
+    await waitFor(`!document.querySelector('.vcl-loading')`);
+    await evaluate(`mockArchivedThreads=[];document.querySelector('[aria-label="刷新已归档聊天"]').click()`);
+    await waitFor(`document.querySelector('.vcl-empty')?.textContent==='暂无已归档聊天'`);
+    await screenshot('navigation-archive-empty.png');
+    console.log('归档专项无头检查通过：完整分页、独立搜索与筛选、折叠滚动与焦点恢复、迟到响应隔离、恢复失败与重试、重复点击保护、仅恢复与恢复后查看、部分恢复、读取失败保留和空状态。');
+  } else if (reasoningOnly) {
     // Native disclosure and streaming transitions run in native-reasoning.mjs.
     // Here exercise the actual stylesheet in a narrow viewport with unbroken text.
     await send('Emulation.setDeviceMetricsOverride', { width: 580, height: 800, deviceScaleFactor: 1, mobile: false }, sessionId);

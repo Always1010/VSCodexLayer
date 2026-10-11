@@ -10,6 +10,16 @@ import { findExtension } from '../tools/layer.mjs';
 import { patchReasoningActivity, patchReasoningRenderer, patchReadTarget } from '../adapters/reasoning.mjs';
 import { patchProjectDraftReset } from '../adapters/draft-lifecycle.mjs';
 import { checkNativeDraftLifecycle } from '../tools/native-draft-lifecycle.mjs';
+import { archiveDependencies } from '../adapters/chat-menu.mjs';
+
+test('原生归档恢复接入缺失或歧义时拒绝生成补丁', () => {
+  const source = 'import{a as scope,b as atom,c as service,d as pins,e as OpenError}from"./native.js";'
+    + 'function footer(){let store=scope(atom);await service(store,host).unarchiveConversation(id,{useAppServerPins:store.get(pins)});'
+    + 'error instanceof OpenError}export{init as n,footer as t};';
+  assert.equal(archiveDependencies(source).service.exported, 'c');
+  assert.throws(() => archiveDependencies(source.replace('unarchiveConversation', 'other')), /数量异常：0/);
+  assert.throws(() => archiveDependencies(source + source), /数量异常：2/);
+});
 
 test('项目连续创建聊天后身份独立，结构不匹配时拒绝补丁', () => {
   const native = 'function reset(scope,{clientNewThreadId:client,draftThreadLocationId:slot}){'

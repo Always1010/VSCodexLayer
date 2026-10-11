@@ -224,6 +224,27 @@ test('同面板导航，只读取聊天摘要，不接管官方消息', async (t
   assert.equal(f.requests.length, 1, '返回空白页不能创建聊天');
 });
 
+test('归档列表独立分页并限制筛选类型，沿用宿主连接且不恢复聊天', async (t) => {
+  const f = fixture(); t.after(() => f.host.dispose());
+  for (const archived of [false, true]) {
+    const pending = f.request('list', { cursor: 'next-page', archived }); await flush();
+    const request = f.requests.at(-1);
+    assert.equal(request[2], 'thread/list');
+    assert.equal(request[3].archived, archived);
+    assert.equal(request[3].cursor, 'next-page');
+    f.callbacks().onResult({ id: request[1], result: { data: [{ id: 'saved', name: '归档记录', cwd: '/project',
+      updatedAt: 123, turns: ['secret'] }], nextCursor: 'following' } });
+    const response = (await pending).result;
+    assert.equal(response.nextCursor, 'following');
+    assert.equal(response.data[0].updatedAt, 123);
+    assert.equal('turns' in response.data[0], false);
+  }
+  for (const archived of ['true', null, 1]) assert.match((await f.request('list', { archived })).error, /筛选参数无效/);
+  assert.equal(f.requests.length, 2);
+  f.messages.length = 0; f.notify({ method: 'thread/unarchived', params: { threadId: 'saved' } });
+  assert.deepEqual(f.messages, [{ type: 'vscodex-layer/event', event: 'threads-changed' }]);
+});
+
 test('不支持的远程工作区和无效路由被拒绝', async (t) => {
   const f = fixture('linux'); t.after(() => f.host.dispose());
   f.vscode.env.remoteName = 'ssh-remote';
