@@ -91,3 +91,13 @@
 - 解决方案：生成中及完成后统一默认折叠，用同一个手动展开状态控制可见性；保留原生 Markdown，移除固定高度滚动组件，正文自然撑开并补充长文本和代码折行。新增主编辑区 Markdown 阅读入口，按宿主／聊天／摘要编号隔离，只同步所选摘要到只读内存文档。
 - 验证：13 项兼容、桥接及宿主测试通过，覆盖阅读更新顺序、内容隔离和面板销毁清理；实际 Linux ARM64 `26.51007.21434` 目标包提取的摘要组件检查通过，覆盖生成中默认折叠、手动展开后的实时增量、完成后保持展开及手动收起，全部生成文件语法及临时副本更新、重复应用和恢复通过；无头浏览器检查窄侧栏、长路径、无空格文本、代码折行及自然高度通过。用户明确授权后已更新实际远程插件，14 个文件与当前补丁计划和安装清单逐一一致，7 份官方原件备份校验通过，操作锁已清除，直接提取已安装摘要组件的行为检查通过。真实 VS Code 点击和主编辑区预览待重新加载后验收。
 - 相关文件：`adapters/reasoning.mjs`、`webview/bootstrap.js`、`webview/layer.mjs`、`webview/layer.css`、`runtime/host.cjs`、`tools/native-reasoning.mjs`、`tools/check-ui.mjs`、`tests/compatibility.test.mjs`、`tests/bootstrap.test.mjs`、`tests/host.test.mjs`、`docs/USAGE.md`。
+
+## ISSUE-010：同一项目连续创建的聊天都打开最新一条
+
+- 日期：2026-10-11
+- 状态：已解决（源代码修复，实际插件待更新）
+- 现象：通过项目入口连续创建聊天后，列表中的三条聊天都打开最新一条。
+- 原因：项目草稿使用独立位置保存临时客户编号，官方完成回调仍以首页或面板的默认草稿位置重置编号，校验不匹配而跳过更新；多个历史聊天因此关联同一个临时编号，最终解析成最新聊天。
+- 解决方案：将项目上下文中的默认草稿重置定向到实际项目位置，保留官方客户编号校验、编号生成及清理流程；普通草稿和其他目录不受影响。严格及兼容适配器共用同一转换。
+- 验证：定向回归测试通过；从实际 Linux ARM64 `26.51007.21434` 包提取官方函数执行检查，旧逻辑复现三条均打开 C，修复后依次打开 A、B、C；首页／面板入口、普通和其他项目草稿隔离及旧回调保护通过。两个适配器语法检查通过，实际安装未修改，真实窗口验收待更新后进行。
+- 相关文件：`adapters/draft-lifecycle.mjs`、`adapters/codex-compatible.mjs`、`adapters/codex-26.5930.51102.mjs`、`tools/native-draft-lifecycle.mjs`、`tools/check-compatible.mjs`、`tools/check-adapter.mjs`、`tests/compatibility.test.mjs`。

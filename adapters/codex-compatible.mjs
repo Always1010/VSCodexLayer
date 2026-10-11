@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { extensionRoot, readUnpatched, sha256 } from '../lib/patch-engine.mjs';
 import { buildReasoningPatchFiles } from './reasoning.mjs';
 import { buildChatMenuPatch } from './chat-menu.mjs';
+import { patchProjectDraftReset } from './draft-lifecycle.mjs';
 
 export const FAMILY = 'codex-webview-family-1';
 const identifier = String.raw`[A-Za-z_$][\w$]*`;
@@ -104,7 +105,7 @@ function patchRoute(source) {
     (_all, isClient, value, isDraft, getter, atom) =>
       `if(${isClient}(${value}))return ${value};if(${isDraft}(${value})||${value}.startsWith(\`vscodex-layer-new:\`))return ${getter}(${atom},${value});let`,
     '草稿客户标识');
-  return source;
+  return patchProjectDraftReset(source);
 }
 
 function arrowBody(source, marker, label) {

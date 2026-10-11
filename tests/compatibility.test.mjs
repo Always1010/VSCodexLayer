@@ -8,6 +8,17 @@ import { probeCompatibility } from '../lib/compatibility.mjs';
 import { findInstalledExtension } from '../lib/extension-discovery.mjs';
 import { findExtension } from '../tools/layer.mjs';
 import { patchReasoningActivity, patchReasoningRenderer, patchReadTarget } from '../adapters/reasoning.mjs';
+import { patchProjectDraftReset } from '../adapters/draft-lifecycle.mjs';
+import { checkNativeDraftLifecycle } from '../tools/native-draft-lifecycle.mjs';
+
+test('项目连续创建聊天后身份独立，结构不匹配时拒绝补丁', () => {
+  const native = 'function reset(scope,{clientNewThreadId:client,draftThreadLocationId:slot}){'
+    + 'if(scope.get(drafts,slot)!==client)return;let next=generate();save(scope,slot,next),scope.set(drafts,slot,next)}'
+    + 'function following(){}';
+  assert.throws(() => patchProjectDraftReset('function other(){}'), /数量异常：0/);
+  assert.throws(() => patchProjectDraftReset(native + native), /数量异常：2/);
+  checkNativeDraftLifecycle(patchProjectDraftReset(native));
+});
 
 async function extension(parent, version, files = {}, platform = 'win32-x64') {
   const root = path.join(parent, `openai.chatgpt-${version}-${platform}`);

@@ -10,6 +10,7 @@ import { applyPatch, inspectPatch, readUnpatched, restorePatch, sha256 } from '.
 import { findExtension } from './layer.mjs';
 import { checkProjectSubmit } from './native-project-submit.mjs';
 import { checkNativeReasoning } from './native-reasoning.mjs';
+import { checkNativeDraftLifecycle } from './native-draft-lifecycle.mjs';
 import { checkNativeChatMenu } from './native-chat-menu.mjs';
 
 const args = process.argv.slice(2);
@@ -20,6 +21,7 @@ const directory = args[1] ?? await findExtension();
 const plan = await buildCompatiblePatchPlan(directory);
 const byPath = (relative) => plan.files.find((entry) => entry.path === relative)?.content.toString();
 const route = byPath(plan.compatibility.route);
+checkNativeDraftLifecycle(route);
 const composer = byPath(plan.compatibility.composer);
 const header = byPath(plan.compatibility.header);
 const host = byPath('out/extension.js');
