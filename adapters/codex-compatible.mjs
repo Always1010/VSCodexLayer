@@ -1,3 +1,4 @@
+import { syntaxType, validateGeneratedCode } from '../lib/plan-syntax.mjs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -259,7 +260,8 @@ export async function buildCompatiblePatchPlan(directory) {
     ['webview/layer.css', 'webview/vscodex-layer/layer.css'],
   ]) files.push({ path: target, originalHash: null,
     content: await fs.readFile(fileURLToPath(new URL(`../${source}`, import.meta.url))) });
-  return { adapter: `${FAMILY}:${version}`, extensionVersion: version, files,
+  for (const entry of files) entry.syntax = syntaxType(entry.path);
+  return validateGeneratedCode({ adapter: `${FAMILY}:${version}`, extensionVersion: version, files,
     compatibility: { family: FAMILY, route: route.path, composer: composer.path, header: header.path,
-      reasoning: reasoning.compatibility, chatMenu: menu.compatibility } };
+      reasoning: reasoning.compatibility, chatMenu: menu.compatibility } });
 }

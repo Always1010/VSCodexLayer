@@ -3,7 +3,6 @@ import os from 'node:os';
 import path from 'node:path';
 import { Script, createContext, runInContext } from 'node:vm';
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
 import { findExtension } from './layer.mjs';
 import { buildPatchPlan, DRAFT_SOURCE } from '../adapters/codex-26.5930.51102.mjs';
 import { applyPatch, restorePatch, sha256, readOriginal } from '../lib/patch-engine.mjs';
@@ -166,12 +165,6 @@ try {
   const result = await applyPatch(fixture, plan);
   if (result.status !== 'patched') throw new Error('补丁未完整应用。');
   if ((await applyPatch(fixture, await buildPatchPlan(fixture))).changed) throw new Error('重复应用未保持幂等。');
-  for (const entry of plan.files.filter((file) => /\.(mjs|cjs|js)$/.test(file.path))) {
-    // A .mjs copy lets Node parse the official ESM chunk without loading its imports.
-    const checkFile = path.join(fixture, entry.path.endsWith('.cjs') ? 'syntax.cjs' : 'syntax.mjs');
-    await fs.writeFile(checkFile, entry.content);
-    execFileSync(process.execPath, ['--check', checkFile], { stdio: 'pipe', windowsHide: true });
-  }
   await restorePatch(fixture);
   for (const entry of plan.files.filter((file) => file.originalHash !== null)) {
     if (sha256(await fs.readFile(path.join(fixture, entry.path))) !== entry.originalHash) throw new Error(`恢复后校验失败：${entry.path}`);

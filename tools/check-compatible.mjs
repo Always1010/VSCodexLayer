@@ -1,5 +1,4 @@
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -126,11 +125,6 @@ try {
   assert.equal(result.status, 'patched');
   const rebuilt = await buildCompatiblePatchPlan(fixture);
   assert.equal((await applyPatch(fixture, rebuilt)).changed, false);
-  for (const entry of plan.files.filter((file) => /\.(mjs|cjs|js)$/.test(file.path))) {
-    const checkFile = path.join(fixture, entry.path.endsWith('.cjs') ? 'syntax.cjs' : 'syntax.mjs');
-    await fs.writeFile(checkFile, entry.content);
-    execFileSync(process.execPath, ['--check', checkFile], { stdio: 'pipe', windowsHide: true });
-  }
   await restorePatch(fixture);
   for (const entry of plan.files.filter((file) => file.originalHash !== null)) {
     assert.equal(sha256(await fs.readFile(path.join(fixture, entry.path))), entry.originalHash);
