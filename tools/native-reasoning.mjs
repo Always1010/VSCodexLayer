@@ -54,7 +54,7 @@ export async function checkNativeReasoning(plan) {
   const jsxName = /\(0,([\w$]+)\.jsx\)/.exec(wrapper)[1];
   const context = vm.createContext({ document: { querySelector: () => null }, queueMicrotask, URLSearchParams,
     acquireVsCodeApi() {},
-    [reactName]: { useSyncExternalStore(subscribe, getSnapshot) {
+    [reactName]: { useEffect(effect) { effect(); }, useSyncExternalStore(subscribe, getSnapshot) {
       subscribe(() => {});
       return getSnapshot();
     } },
@@ -71,8 +71,10 @@ export async function checkNativeReasoning(plan) {
   context.__vscodexLayerBridge.setReasoningEnabled(true);
   const visible = render(props);
   assert.equal(visible.props['data-vcl-reasoning-summary'], true);
-  assert.equal(visible.props.children.type, context.__vclNativeReasoningSummary);
-  assert.equal(visible.props.children.props, props, '历史摘要和当前宿主参数必须原样传入官方组件');
+  assert.equal(visible.props.children[0].type, context.__vclNativeReasoningSummary);
+  assert.equal(visible.props.children[0].props, props, '历史摘要和当前宿主参数必须原样传入官方组件');
+  assert.equal(visible.props.children[1].type, 'button');
+  assert.equal(visible.props.children[1].props['aria-label'], '在主编辑区阅读实时摘要');
   context.__vscodexLayerBridge.setReasoningEnabled(false);
   assert.equal(render(props), null, '返回原版后必须隐藏摘要');
   context.__vscodexLayerBridge = undefined;
@@ -143,8 +145,24 @@ function checkNativeDisclosure(native, reactName, jsxName) {
     assert.equal(find(render(item), (value) => value.props?.isStreaming !== undefined), null);
   }
   expanded = false;
-  for (const content of ['**思考', '**思考摘要**\n\n第一段', '**思考摘要**\n\n第一段\n第二段']) {
-    const stream = find(render({ content, completed: false }), (value) => value.props?.isStreaming === true);
-    assert.equal(stream?.props.children, content, '原生流式组件应显示逐步增长的完整摘要');
+  const parts = ['**思考', '**思考摘要**\n\n第一段', '**思考摘要**\n\n第一段\n第二段'];
+  const closed = render({ content: parts[0], completed: false });
+  assert.equal(find(closed, (value) => value.props?.isStreaming !== undefined), null, '生成中也必须默认折叠');
+  const disclosure = find(closed, (value) => value.props?.disclosure)?.props.disclosure;
+  assert.equal(disclosure?.expanded, false, '生成中必须提供展开控件');
+  disclosure.onToggle();
+  for (const content of parts) {
+    const tree = render({ content, completed: false });
+    const stream = find(tree, (value) => value.props?.isStreaming === true);
+    assert.equal(stream?.props.children, content, '手动展开后实时显示逐步增长的完整摘要');
+    const body = find(tree, (value) => value.props?.['data-vcl-reasoning-body']);
+    assert.equal(body?.type, 'div', '正文使用自然高度，不能恢复嵌套的小滚动窗口');
+    assert.equal(find(tree, (value) => value.props?.maxHeightByState), null);
   }
+  const finished = render({ content: parts.at(-1), completed: true });
+  assert.equal(find(finished, (value) => value.props?.isStreaming === false)?.props.children, parts.at(-1),
+    '任务完成后保留手动展开状态及正文');
+  find(finished, (value) => value.props?.disclosure).props.disclosure.onToggle();
+  assert.equal(find(render({ content: parts.at(-1) + '\n新内容', completed: false }),
+    (value) => value.props?.isStreaming !== undefined), null, '手动收起后新内容不得强制展开');
 }

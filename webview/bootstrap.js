@@ -9,6 +9,17 @@
   let nativeReady = false;
   let newChatHandler;
   let projectValidator;
+  let reasoningReader;
+  let readingKey;
+  let readingReady;
+  const reasoningDetail = (props) => {
+    const itemId = props?.item?.sourceItemId ?? props?.item?.searchItemId;
+    if (typeof itemId !== 'string' || typeof props?.conversationId !== 'string'
+      || typeof props?.item?.content !== 'string') return null;
+    return { hostId: props.hostId ?? 'local', conversationId: props.conversationId,
+      itemId, content: props.item.content, completed: props.item.completed === true };
+  };
+  const reasoningKey = (detail) => JSON.stringify([detail.hostId, detail.conversationId, detail.itemId]);
   let route = document.querySelector('meta[name="initial-route"]')?.content ?? '/';
   let notifyQueued = false;
   const notify = () => {
@@ -33,6 +44,33 @@
       for (const callback of reasoningSubscribers) {
         try { callback(); } catch { /* A failed enhancement subscriber must not affect the native app. */ }
       }
+    },
+    setReasoningReader(handler) {
+      reasoningReader = handler;
+      return () => {
+        if (reasoningReader !== handler) return;
+        reasoningReader = undefined; readingKey = undefined; readingReady = undefined;
+      };
+    },
+    openReasoningView(props) {
+      const detail = reasoningDetail(props);
+      if (!reasoningEnabled || !reasoningReader || !detail) return;
+      const handler = reasoningReader;
+      readingKey = reasoningKey(detail);
+      readingReady = Promise.resolve(handler('open-reasoning-view', detail));
+      readingReady.catch(() => { /* The navigation handler reports open failures. */ });
+    },
+    updateReasoningView(props) {
+      const detail = reasoningDetail(props);
+      if (!reasoningEnabled || !reasoningReader || !detail || reasoningKey(detail) !== readingKey) return;
+      const handler = reasoningReader;
+      // Opening can involve an asynchronous VS Code command; never send an update before it.
+      const key = readingKey;
+      readingReady?.then(() => {
+        if (reasoningReader === handler && readingKey === key && reasoningEnabled) {
+          return handler('update-reasoning-view', detail);
+        }
+      }).catch(() => { /* The navigation handler reports reader failures. */ });
     },
     observeRoute(path) {
       if (typeof path === 'string' && path !== route) { route = path; notify(); }

@@ -149,7 +149,7 @@ test('只读探测报告动态入口和语义候选文件', async (t) => {
 
 test('推理摘要结构缺失、歧义或重复补丁时拒绝转换', () => {
   const activity = 'function classify($,{dynamicToolCallRenderer:a,includeGeneratedImages:b=!1,mcpServerStatuses:c}={}){switch($.type){case`user-message`:return wrap($,`standalone`);case`reasoning`:return null}}function wrap(item,grouping){return{item,grouping}}';
-  const renderer = 'function render(p){let t=(0,Cache.c)(3),{item:$,conversationId:a,cwd:b,hideCodeBlocks:c,hostId:d}=p,n=!$.completed,u=n?``:strip($.content),v=trim($.content).trimStart(),[x,set]=(0,React.useState)(!1);return(0,JSX.jsx)(Frame,{disclosure:{onToggle:()=>set(!x)},key:`reasoning-markdown`,text:v})}function next(){}';
+  const renderer = 'function render(p){let t=(0,Cache.c)(3),{item:$,conversationId:a,cwd:b,hideCodeBlocks:c,hostId:d}=p,n=!$.completed,u=n?``:strip($.content),v=trim($.content).trimStart(),[x,set]=(0,React.useState)(!1),g=!n&&!!u,y=n?!!v&&(s==null||s===`resumed`):x,z=y?(0,JSX.jsx)(Scroll,{items:[{key:`reasoning-markdown`,node:md}],autoScrollToBottom:n,contentClassName:`gap-0`,maxHeightByState:{preview:`8.75rem`,expanded:`8.75rem`,collapsed:`0px`},viewState:`expanded`,className:`[--edge-fade-distance:1rem]`}):null;return(0,JSX.jsx)(Frame,{disclosure:{onToggle:()=>set(!x)},text:v,body:z})}function next(){}';
   for (const [transform, source] of [[patchReasoningActivity, activity], [patchReasoningRenderer, renderer]]) {
     assert.throws(() => transform('unknown layout'), /数量异常/);
     assert.throws(() => transform(source + source), /数量异常/);
@@ -157,6 +157,7 @@ test('推理摘要结构缺失、歧义或重复补丁时拒绝转换', () => {
     assert.throws(() => transform(patched), /数量异常/);
   }
   assert.throws(() => patchReasoningRenderer(renderer.replace('onToggle:', 'changedControl:')), /缺少/);
+  assert.throws(() => patchReasoningRenderer(renderer.replace('8.75rem', 'unknown')), /固定高度滚动容器/);
   const assistant = 'function render(p){let t=(0,Cache.c)(3),{item:n,assistantCopyText:r,turnId:i,cwd:d,conversationId:l,hostId:f}=p;return(0,JSX.jsx)(Body,{item:n})}function next(){}';
   assert.throws(() => patchReadTarget('unknown layout'), /数量异常/);
   assert.throws(() => patchReadTarget(assistant + assistant), /数量异常/);

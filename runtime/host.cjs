@@ -66,6 +66,45 @@ exports.createLayerHost = function createLayerHost({ vscode, provider, webview, 
   const pending = new Map();
   const disposables = [];
   let disposed = false;
+  let reading;
+  let readerUri;
+  let readerChanges;
+  const readerKey = (detail) => JSON.stringify([detail.hostId, detail.conversationId, detail.itemId]);
+  function readerDetail(value) {
+    for (const key of ['hostId', 'conversationId', 'itemId']) {
+      if (typeof value[key] !== 'string' || !value[key] || value[key].length > 200 || value[key].includes('\0')) {
+        throw new Error('摘要阅读位置无效。');
+      }
+    }
+    if (typeof value.content !== 'string' || value.content.length > 2 * 1024 * 1024) throw new Error('摘要正文无效或过长。');
+    return { hostId: value.hostId, conversationId: value.conversationId, itemId: value.itemId,
+      content: value.content, completed: value.completed === true };
+  }
+  function readerText() {
+    return `# 思考摘要\n\n${reading?.completed ? '已完成' : '生成中 · 正文随收到的摘要更新'}\n\n${reading?.content ?? ''}`;
+  }
+  async function openReader(params) {
+    const detail = readerDetail(params);
+    if (!readerUri) {
+      // A per-panel scheme prevents collisions between Codex panels and remote hosts.
+      const scheme = `vscodex-reasoning-${randomUUID()}`;
+      readerChanges = new vscode.EventEmitter();
+      const registration = vscode.workspace.registerTextDocumentContentProvider(scheme, {
+        onDidChange: readerChanges.event,
+        provideTextDocumentContent: () => readerText(),
+      });
+      readerUri = vscode.Uri.from({ scheme, path: '/思考摘要.md' });
+      disposables.push(registration, readerChanges);
+    }
+    reading = detail;
+    readerChanges.fire(readerUri);
+    await vscode.workspace.openTextDocument(readerUri);
+    if (disposed) return { opened: false };
+    // Use VS Code's built-in Markdown renderer in the main editor, rather than
+    // adding another scrollable viewport inside the Codex sidebar. No file is written.
+    await vscode.commands.executeCommand('markdown.showPreview', readerUri);
+    return { opened: true };
+  }
   const post = (message) => { if (!disposed) Promise.resolve(webview.postMessage(message)).catch(() => {}); };
   const folders = () => (vscode.workspace.workspaceFolders ?? []).map((folder) => ({
     name: folder.name, path: folder.uri.fsPath, scheme: folder.uri.scheme, authority: folder.uri.authority,
@@ -124,6 +163,16 @@ exports.createLayerHost = function createLayerHost({ vscode, provider, webview, 
       state: cleanState(await provider.globalState.get(STATE_KEY)), version: provider.extensionVersion };
     const environment = support();
     if (!environment.supported) throw new Error(environment.reason);
+    if (method === 'open-reasoning-view') return openReader(params);
+    if (method === 'update-reasoning-view') {
+      const detail = readerDetail(params);
+      if (!reading || readerKey(detail) !== readerKey(reading)) return { updated: false };
+      if (reading.content !== detail.content || reading.completed !== detail.completed) {
+        reading = detail;
+        readerChanges.fire(readerUri);
+      }
+      return { updated: true };
+    }
     if (method === 'list') {
       if (params.cursor != null && (typeof params.cursor !== 'string' || params.cursor.length > 16384)) throw new Error('分页参数无效。');
       const result = await list(params.cursor);
@@ -203,6 +252,7 @@ exports.createLayerHost = function createLayerHost({ vscode, provider, webview, 
     dispose() {
       if (disposed) return;
       disposed = true;
+      reading = undefined;
       rejectAll(new Error('聊天面板已关闭。'));
       for (const disposable of disposables) disposable.dispose();
     },

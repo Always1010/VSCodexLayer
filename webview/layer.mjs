@@ -81,6 +81,8 @@ class Navigation {
     this.rail.append(header, controls, this.status, this.list, footer, this.resizeHandle);
     document.body.append(this.rail); document.body.classList.add('vcl-enabled');
     this.bridge.setReasoningEnabled(true);
+    this.cleanups.push(this.bridge.setReasoningReader((method, detail) =>
+      this.client.request(method, detail).catch((error) => { this.showError(error); throw error; })));
     this.reader = new ReplyReader(this.activity, () => this.active, () => { this.render(); this.persist(); });
     this.cleanups.push(() => this.reader.dispose());
     this.cleanups.push(this.bridge.subscribe(({ route }) => this.onRoute(route)));

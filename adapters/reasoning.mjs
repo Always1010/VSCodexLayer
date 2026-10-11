@@ -46,10 +46,26 @@ export function patchReasoningRenderer(source) {
   // Keep all readable summary text in both the live and completed views.
   body = body.replace(completedText, `$1=$2?\`\`:${item}.content`)
     .replace(streamingText, `$1=${item}.content.trimStart()`);
+  const disclosure = new RegExp(`(${identifier})=!(${identifier})&&!!(${identifier}),`, 'g');
+  unique([...body.matchAll(disclosure)], '生成中摘要展开控件');
+  const visible = new RegExp(`(${identifier})=(${identifier})\\?!!(${identifier})&&\\((${identifier})==null\\|\\|\\4===\`resumed\`\\):(${identifier}),`, 'g');
+  unique([...body.matchAll(visible)], '摘要正文可见状态');
+  const scroller = new RegExp(`\\(0,${escaped(jsx)}\\.jsx\\)\\((${identifier}),\\{items:\\[\\{key:\`reasoning-markdown\`,node:(${identifier})\\}\\],autoScrollToBottom:${identifier},contentClassName:\`gap-0\`,maxHeightByState:\\{preview:\`8\\.75rem\`,expanded:\`8\\.75rem\`,collapsed:\`0px\`\\},viewState:\`expanded\`,className:\`\\[--edge-fade-distance:1rem\\]\`\\}\\)`, 'g');
+  unique([...body.matchAll(scroller)], '摘要固定高度滚动容器');
+  // One user-controlled state for live and completed items. Keep native Markdown,
+  // but let the chat own vertical scrolling instead of nesting a 140px viewport.
+  body = body.replace(disclosure, `$1=!!${item}.content.trim(),`)
+    .replace(visible, '$1=$5,')
+    .replace(scroller, `(0,${jsx}.jsx)(\`div\`,{"data-vcl-reasoning-body":true,key:\`reasoning-markdown\`,children:$2})`);
   const wrapper = `function __vclReasoningOff(){return!1}function __vclReasoningNoop(){return()=>{}}`
     + `function ${match[1]}(${match[2]}){let __vclBridge=globalThis.__vscodexLayerBridge;`
     + `let __vclEnabled=(0,${react}.useSyncExternalStore)(__vclBridge?.subscribeReasoning??__vclReasoningNoop,__vclBridge?.reasoningEnabled??__vclReasoningOff,__vclReasoningOff);`
-    + `return __vclEnabled?(0,${jsx}.jsx)(\`div\`,{\"data-vcl-reasoning-summary\":true,role:\`group\`,\"aria-label\":\`推理摘要\`,children:(0,${jsx}.jsx)(__vclNativeReasoningSummary,${match[2]})}):null;}`;
+    + `(0,${react}.useEffect)(()=>{if(__vclEnabled)__vclBridge?.updateReasoningView?.(${match[2]})},[__vclEnabled,${match[2]}.item.content,${match[2]}.item.completed,${match[2]}.item.sourceItemId,${match[2]}.conversationId,${match[2]}.hostId]);`
+    + `return __vclEnabled?(0,${jsx}.jsx)(\`div\`,{\"data-vcl-reasoning-summary\":true,role:\`group\`,\"aria-label\":\`推理摘要\`,children:[`
+    + `(0,${jsx}.jsx)(__vclNativeReasoningSummary,${match[2]},JSON.stringify([${match[2]}.hostId,${match[2]}.conversationId,${match[2]}.item.sourceItemId??${match[2]}.item.searchItemId])),`
+    + `(0,${jsx}.jsx)(\`button\`,{type:\`button\`,className:\`vcl-reasoning-reader\`,title:\`在主编辑区阅读实时摘要\`,\"aria-label\":\`在主编辑区阅读实时摘要\`,onClick:()=>__vclBridge?.openReasoningView?.(${match[2]}),children:`
+    + `(0,${jsx}.jsx)(\`svg\`,{viewBox:\`0 0 24 24\`,fill:\`none\`,stroke:\`currentColor\`,strokeWidth:1.6,\"aria-hidden\":true,children:`
+    + `(0,${jsx}.jsx)(\`path\`,{d:\`M15 3h6v6M10 14 21 3M21 14v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5\`})})},\`reader\`)]}):null;}`;
   return { content: source.slice(0, match.index) + wrapper
     + body.replace(`function ${match[1]}(`, 'function __vclNativeReasoningSummary(') + source.slice(end + 1),
   renderer: match[1] };
