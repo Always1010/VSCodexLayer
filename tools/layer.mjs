@@ -39,6 +39,12 @@ export async function main(args = process.argv.slice(2)) {
       result = { ...result, compatible: true, family: plan.compatibility.family,
         selected: plan.compatibility, changes: plan.files.map((entry) => entry.path) };
     } catch (error) { result = { ...result, compatible: false, reason: error.message }; }
+    result = { ...result, patchCompatible: result.compatible, runtimeSupport: {
+      verified: false,
+      modes: ['local', 'ssh-remote'],
+      requirement: 'SSH 模式要求 Codex 扩展运行在远程 Linux 工作区宿主，工作区属于同一 SSH 主机；WSL 和其他远程模式暂不支持。',
+      note: 'compatible / patchCompatible 仅表示补丁结构兼容；实际运行支持由 VS Code 内的宿主初始化检查。',
+    } };
   }
   else if (command === 'restore') result = await restorePatch(directory);
   else {
