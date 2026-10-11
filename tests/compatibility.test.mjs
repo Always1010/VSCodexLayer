@@ -3,8 +3,10 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { PassThrough } from 'node:stream';
 import { probeCompatibility } from '../lib/compatibility.mjs';
 import { findInstalledExtension } from '../lib/extension-discovery.mjs';
+import { findExtension } from '../tools/layer.mjs';
 import { patchReasoningActivity, patchReasoningRenderer } from '../adapters/reasoning.mjs';
 
 async function extension(parent, version, files = {}, platform = 'win32-x64') {
@@ -58,6 +60,46 @@ test('ARM64 发现遵循安装清单、平台和过期标记，多个宿主拒�
   assert.equal((await findInstalledExtension(remote, options)).root, current);
   await fs.writeFile(path.join(remote, 'extensions.json'), '[]');
   await assert.rejects(findInstalledExtension(remote, options), /未找到/);
+});
+
+test('终端选择宿主只使用各目录当前版本，取消及非交互环境不猜测目标', async (t) => {
+  const home = await fs.mkdtemp(path.join(os.tmpdir(), 'vscodex-selection-'));
+  t.after(() => fs.rm(home, { recursive: true, force: true }));
+  const options = { home, platform: 'linux-arm64' };
+  const remoteParent = path.join(home, '.vscode-server', 'extensions');
+  const remote = await extension(remoteParent, '26.2.0', {}, options.platform);
+  // 单目录及显式目录不应进入选择器。
+  assert.equal((await findInstalledExtension(undefined, { ...options, select: () => assert.fail('不应询问') })).root, remote);
+  await extension(remoteParent, '26.1.0', {}, options.platform);
+  const obsolete = await extension(remoteParent, '99.0.0', {}, options.platform);
+  await fs.writeFile(path.join(remoteParent, '.obsolete'), JSON.stringify({ [path.basename(obsolete)]: true }));
+  const local = await extension(path.join(home, '.vscode', 'extensions'), '26.3.0', {}, options.platform);
+  assert.equal((await findInstalledExtension(remoteParent, { ...options, select: () => assert.fail('不应询问') })).root, remote);
+  await assert.rejects(findInstalledExtension(undefined, { ...options, select: () => ({ root: obsolete }) }), /未选择有效/);
+
+  async function choose(answer, tty = true) {
+    const input = new PassThrough();
+    const output = new PassThrough();
+    input.isTTY = output.isTTY = tty;
+    let menu = '';
+    output.on('data', (chunk) => { menu += chunk; });
+    const result = findExtension({ ...options, input, output });
+    // 异步送入模拟终端输入；发现目录期间由流保留输入。
+    const send = setImmediate(() => input.end(answer));
+    try { return { root: await result, menu }; }
+    finally { clearImmediate(send); input.destroy(); output.destroy(); }
+  }
+  const selectedRemote = await choose('1\n');
+  assert.equal(selectedRemote.root, remote);
+  assert.match(selectedRemote.menu, /VS Code Server（Remote SSH）/);
+  assert.match(selectedRemote.menu, /本机桌面 VS Code/);
+  assert.ok(selectedRemote.menu.includes(local));
+  assert.ok(!selectedRemote.menu.includes(obsolete));
+  const selectedLocal = await choose('0\n3\n1.5\nno\n2\n');
+  assert.equal(selectedLocal.root, local);
+  assert.match(selectedLocal.menu, /编号无效/);
+  for (const answer of ['q\n', '\n', '']) await assert.rejects(choose(answer), /已取消/);
+  await assert.rejects(choose('1\n', false), /交互终端/);
 });
 
 test('只读探测报告动态入口和语义候选文件', async (t) => {
