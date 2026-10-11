@@ -56,7 +56,7 @@ export function archiveDependencies(source) {
   const scope = unique([...source.matchAll(new RegExp(`\\b${escape(restore[2])}=(${identifier})\\((${identifier})\\)`, 'g'))], '原生归档恢复作用域');
   const openError = [...new Set([...source.matchAll(new RegExp(`instanceof (${identifier})`, 'g'))].map((match) => match[1]))];
   const initializer = unique([...source.matchAll(new RegExp(`export\\{(${identifier}) as n,`, 'g'))], '原生归档恢复初始化')[1];
-  return { initializer, scope: imported(source, scope[1]), scopeAtom: imported(source, scope[2]),
+  return { initializer: exportName(source, initializer), scope: imported(source, scope[1]), scopeAtom: imported(source, scope[2]),
     service: imported(source, restore[1]), pins: imported(source, restore[3]),
     openError: imported(source, unique(openError, '原生恢复后加载错误')) };
 }
@@ -92,6 +92,26 @@ export function patchMenuHeader(source, { menuPath, menu, dom, archive }) {
   return imports + source.replace(`${exported} as t`, '__vclHeader as t') + '\n' + wrapper;
 }
 
+// Check the bridge's added imports against the actual native export tables.
+// Syntax-only checks and component mocks cannot catch missing named exports.
+export async function validateHeaderImports(source, readModule) {
+  const modules = new Map();
+  for (const match of source.matchAll(/import\{([^}]+)\}from["']([^"']+)["']/g)) {
+    const bindings = match[1].split(',').map((binding) => binding.trim().split(/\s+as\s+/))
+      .filter((binding) => binding[1]?.startsWith('__vcl'));
+    if (!bindings.length) continue;
+    if (!modules.has(match[2])) {
+      const dependency = await readModule(match[2]);
+      const names = new Set([...dependency.matchAll(/export\{([^}]+)\}/g)].flatMap((exports) =>
+        exports[1].split(',').map((binding) => binding.trim().split(/\s+as\s+/).at(-1))));
+      modules.set(match[2], names);
+    }
+    for (const [name] of bindings) {
+      if (!modules.get(match[2]).has(name)) throw new Error(`原生菜单依赖缺少导出：${match[2]} → ${name}`);
+    }
+  }
+}
+
 export async function buildChatMenuPatch(root, header) {
   const directory = path.join(root, 'webview', 'assets');
   const entries = await fs.readdir(directory);
@@ -116,7 +136,10 @@ export async function buildChatMenuPatch(root, header) {
     }));
   const archiveSource = unique(archiveCandidates.filter(({ content }) => content.includes('previewUnarchiveError')), '原生归档恢复资源');
   const archive = { path: archiveSource.path, ...archiveDependencies(archiveSource.content) };
-  return { header: patchMenuHeader(header, { menuPath: selected.path, menu, dom, archive }),
+  const patchedHeader = patchMenuHeader(header, { menuPath: selected.path, menu, dom, archive });
+  await validateHeaderImports(patchedHeader, async (file) =>
+    (await readUnpatched(root, path.posix.join('webview/assets', file))).toString());
+  return { header: patchedHeader,
     file: { path: selected.path, originalHash: sha256(selected.bytes), content: menu.content },
     compatibility: { menu: selected.path, component: menu.component, framework: frameworkPath, archive } };
 }
