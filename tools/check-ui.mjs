@@ -164,11 +164,24 @@ try {
   await assertBrowser(`document.querySelectorAll('.vcl-thread').length===1`, '聊天搜索错误');
   await evaluate(`document.querySelector('.vcl-input').value='';document.querySelector('.vcl-input').dispatchEvent(new Event('input'));document.querySelector('[data-vcl-key="thread:thread-0"]').click()`);
   await waitFor(`document.querySelector('[data-vcl-key="thread:thread-0"]')?.getAttribute('aria-current')==='page'`);
+  await evaluate(`window.postMessage({type:'vscodex-layer/event',event:{type:'thread-activity',threadId:'thread-0',phase:'completed',status:'idle',activeFlags:[]}},location.origin)`);
+  await waitFor(`document.querySelector('[data-vcl-key="thread:thread-0"] .vcl-attention')`);
+  await assertBrowser(`document.querySelector('[data-vcl-key="thread:thread-0"]').getAttribute('aria-label').includes('本轮已结束') && getComputedStyle(document.querySelector('.vcl-attention')).backgroundColor==='rgb(55, 148, 255)'`, '当前聊天结束没有蓝点或状态说明');
   await evaluate(`document.querySelector('.vcl-project-heading').click();document.querySelector('[aria-label="刷新聊天列表"]').click()`);
   await waitFor(`!document.querySelector('[aria-label="刷新聊天列表"]').disabled`);
   await assertBrowser(`document.querySelectorAll('.vcl-thread').length===0`, '项目折叠失败');
+  await assertBrowser(`document.querySelector('.vcl-project-heading .vcl-attention')`, '折叠项目丢失提醒');
   await evaluate(`document.querySelector('.vcl-project-heading').click();document.querySelector('[role=separator]').dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowRight',bubbles:true}))`);
   await waitFor(`mockState.width===260 && mockState.mode==='current'`);
+  await assertBrowser(`mockState.unread.includes('thread-0') && document.querySelector('[data-vcl-key="thread:thread-0"] .vcl-attention')`, '刷新丢失结束提示或未保存未读状态');
+  await evaluate(`document.querySelector('[data-vcl-key="thread:thread-0"]').click()`);
+  await assertBrowser(`!document.querySelector('[data-vcl-key="thread:thread-0"] .vcl-attention')`, '点击当前聊天没有清除结束提示');
+  await evaluate(`window.postMessage({type:'vscodex-layer/event',event:{type:'thread-activity',threadId:'thread-0',phase:'status',status:'active',activeFlags:['waitingOnApproval']}},location.origin)`);
+  await waitFor(`document.querySelector('[data-vcl-key="thread:thread-0"] .vcl-attention')`);
+  await evaluate(`document.querySelector('[data-vcl-key="thread:thread-0"]').click()`);
+  await assertBrowser(`document.querySelector('[data-vcl-key="thread:thread-0"]').getAttribute('aria-label').includes('等待审批') && document.querySelector('[data-vcl-key="thread:thread-0"] .vcl-attention')`, '查看误清除尚未处理的审批提醒');
+  await evaluate(`window.postMessage({type:'vscodex-layer/event',event:{type:'thread-activity',threadId:'thread-0',phase:'started',status:'active',activeFlags:[]}},location.origin)`);
+  await waitFor(`!document.querySelector('[data-vcl-key="thread:thread-0"] .vcl-attention')`);
   await screenshot('navigation-current.png');
   await evaluate(`document.documentElement.dataset.theme='dark';document.body.style.background='#181818';document.body.style.color='#eee'`);
   await screenshot('navigation-dark.png');
@@ -227,7 +240,7 @@ try {
   await toggleShortcut();
   await waitFor(`document.getElementById('vcl-navigation')?.classList.contains('vcl-collapsed')`);
   await screenshot('navigation-narrow.png');
-  console.log('无头界面检查通过：项目新建按钮、完整目录绑定、草稿隔离、失效目录与发送清理、顶部返回键隐藏，以及快捷键、搜索筛选和导航布局。');
+  console.log('无头界面检查通过：提醒与结束蓝点、折叠项目汇总、未读保存与查看清除，以及项目新建、草稿隔离、搜索筛选和导航布局。');
   console.log(`模拟界面截图：${output}`);
 } finally {
   if (socket?.readyState === WebSocket.OPEN) {

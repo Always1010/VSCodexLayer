@@ -1,5 +1,5 @@
 import { LayerClient } from './client.mjs';
-import { groupThreads, normalizePath, projectName, routeThreadId, loadAllThreads } from './core.mjs';
+import { groupThreads, normalizePath, projectName, routeThreadId, loadAllThreads, ThreadActivity } from './core.mjs';
 
 const SVG = 'http://www.w3.org/2000/svg';
 const icons = {
@@ -35,6 +35,7 @@ class Navigation {
   constructor(client, bridge, info) {
     this.client = client; this.bridge = bridge; this.info = info; this.state = info.state;
     this.threads = []; this.closed = new Set(this.state.groups); this.query = ''; this.active = null;
+    this.activity = new ThreadActivity(this.state.unread);
     this.draftPath = '/';
     this.projectCwd = null; this.draftProjectCwd = null;
     this.abort = new AbortController(); this.cleanups = []; this.disposed = false;
@@ -91,6 +92,7 @@ class Navigation {
           this.info.folders = next.folders; this.render();
         }).catch((error) => this.showError(error));
       } else if (event === 'threads-changed') this.scheduleRefresh();
+      else if (this.activity.receive(event)) { this.render(); this.persist(); }
     }));
     const resize = () => this.layout(); window.addEventListener('resize', resize);
     this.cleanups.push(() => window.removeEventListener('resize', resize));
@@ -128,6 +130,7 @@ class Navigation {
     }
     const next = routeThreadId(route);
     if (this.active === next && !changedProject) return;
+    if (next && this.activity.acknowledge(next)) this.persist();
     this.active = next; const thread = this.threads.find((item) => item.id === next);
     if (thread) this.closed.delete(normalizePath(thread.cwd));
     this.render(); if (next && !thread) this.scheduleRefresh();
@@ -195,6 +198,10 @@ class Navigation {
       heading.append(icon('chevron', closed ? '' : 'vcl-open'), icon('folder'), element('span', 'vcl-label', group.name));
       if (group.current) heading.append(element('span', 'vcl-current', '当前'));
       heading.append(element('span', 'vcl-group-count', String(group.total)));
+      if (closed && group.threads.some((thread) => this.activity.indicator(thread)?.kind === 'attention')) {
+        heading.append(this.activityDot({ kind: 'attention', label: '项目中有聊天需要查看' }));
+        heading.setAttribute('aria-label', `${group.name}，项目中有聊天需要查看`);
+      }
       heading.addEventListener('click', () => {
         if (this.closed.has(group.key)) this.closed.delete(group.key); else this.closed.add(group.key);
         this.render(); this.persist();
@@ -207,11 +214,16 @@ class Navigation {
           row.type = 'button'; row.dataset.vclKey = `thread:${thread.id}`;
           row.title = `${thread.title}\n${thread.cwd || '未分类'}`;
           if (this.active === thread.id) row.setAttribute('aria-current', 'page');
-          if (thread.status === 'active' || thread.status === 'running') {
-            const activity = element('span', 'vcl-activity'); activity.title = '正在运行'; row.append(activity);
-          }
           row.append(element('span', 'vcl-label', thread.title));
-          row.addEventListener('click', () => this.client.request('navigate', { threadId: thread.id }).catch((error) => this.showError(error)));
+          const indicator = this.activity.indicator(thread);
+          if (indicator) {
+            row.append(this.activityDot(indicator)); row.title += `\n${indicator.label}`;
+            row.setAttribute('aria-label', `${thread.title}，${indicator.label}`);
+          }
+          row.addEventListener('click', () => {
+            if (this.activity.acknowledge(thread.id)) { this.render(); this.persist(); }
+            this.client.request('navigate', { threadId: thread.id }).catch((error) => this.showError(error));
+          });
           children.append(row);
         }
       }
@@ -225,6 +237,10 @@ class Navigation {
       : this.state.mode === 'current' && !this.info.folders.length ? '当前窗口没有本地项目' : '暂无聊天'));
     this.list.replaceChildren(fragment); this.count.textContent = `${groups.length} 个项目 · ${visibleThreads} 个聊天`;
     if (focused) [...this.list.querySelectorAll('[data-vcl-key]')].find((node) => node.dataset.vclKey === focused)?.focus({ preventScroll: true });
+  }
+  activityDot({ kind, label }) {
+    const dot = element('span', `vcl-activity${kind === 'attention' ? ' vcl-attention' : ''}`);
+    dot.title = label; dot.setAttribute('aria-hidden', 'true'); return dot;
   }
   onListKey(event) {
     const row = event.target.closest('button');
@@ -256,11 +272,13 @@ class Navigation {
   }
   persist() {
     if (this.disposed) return;
+    this.state.unread = [...this.activity.unread];
     clearTimeout(this.saveTimer); this.saveTimer = setTimeout(() => {
       this.client.request('save-state', { state: { ...this.state, groups: [...this.closed] } }).catch((error) => this.showError(error));
     }, 200);
   }
   async disable() {
+    this.state.unread = [...this.activity.unread];
     try { await this.client.request('save-state', { state: { ...this.state, groups: [...this.closed], disabled: true } }); }
     catch (error) { this.showError(error); return; }
     this.dispose(); showLauncher('启用项目导航');
