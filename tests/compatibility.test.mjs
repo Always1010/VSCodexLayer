@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { probeCompatibility } from '../lib/compatibility.mjs';
 import { findInstalledExtension } from '../lib/extension-discovery.mjs';
+import { patchReasoningActivity, patchReasoningRenderer } from '../adapters/reasoning.mjs';
 
 async function extension(parent, version, files = {}, platform = 'win32-x64') {
   const root = path.join(parent, `openai.chatgpt-${version}-${platform}`);
@@ -77,4 +78,16 @@ test('只读探测报告动态入口和语义候选文件', async (t) => {
   assert.deepEqual(result.discovered.composerCandidates, ['app-initial-composer.js']);
   assert.deepEqual(result.discovered.headerCandidates, ['header-new.js']);
   assert.ok(Object.values(result.checks).every(Boolean));
+});
+
+test('推理摘要结构缺失、歧义或重复补丁时拒绝转换', () => {
+  const activity = 'function classify($,{dynamicToolCallRenderer:a,includeGeneratedImages:b=!1,mcpServerStatuses:c}={}){switch($.type){case`user-message`:return wrap($,`standalone`);case`reasoning`:return null}}function wrap(item,grouping){return{item,grouping}}';
+  const renderer = 'function render(p){let t=(0,Cache.c)(3),{item:$,conversationId:a,cwd:b,hideCodeBlocks:c,hostId:d}=p,n=!$.completed,u=n?``:strip($.content),v=trim($.content).trimStart(),[x,set]=(0,React.useState)(!1);return(0,JSX.jsx)(Frame,{disclosure:{onToggle:()=>set(!x)},key:`reasoning-markdown`,text:v})}function next(){}';
+  for (const [transform, source] of [[patchReasoningActivity, activity], [patchReasoningRenderer, renderer]]) {
+    assert.throws(() => transform('unknown layout'), /数量异常/);
+    assert.throws(() => transform(source + source), /数量异常/);
+    const patched = transform(source).content;
+    assert.throws(() => transform(patched), /数量异常/);
+  }
+  assert.throws(() => patchReasoningRenderer(renderer.replace('onToggle:', 'changedControl:')), /缺少/);
 });

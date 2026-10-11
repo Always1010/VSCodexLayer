@@ -2,6 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { extensionRoot, readUnpatched, sha256 } from '../lib/patch-engine.mjs';
+import { buildReasoningPatchFiles } from './reasoning.mjs';
 
 export const FAMILY = 'codex-webview-family-1';
 const identifier = String.raw`[A-Za-z_$][\w$]*`;
@@ -240,6 +241,8 @@ export async function buildCompatiblePatchPlan(directory) {
     const bytes = await readUnpatched(root, relative);
     files.push({ path: relative, originalHash: sha256(bytes), content: transform(bytes.toString('utf8')) });
   }
+  const reasoning = await buildReasoningPatchFiles(root);
+  files.push(...reasoning.files);
   for (const [source, target] of [
     ['runtime/host.cjs', 'out/vscodex-layer-host.cjs'],
     ['webview/bootstrap.js', 'webview/vscodex-layer/bootstrap.js'],
@@ -250,5 +253,6 @@ export async function buildCompatiblePatchPlan(directory) {
   ]) files.push({ path: target, originalHash: null,
     content: await fs.readFile(fileURLToPath(new URL(`../${source}`, import.meta.url))) });
   return { adapter: `${FAMILY}:${version}`, extensionVersion: version, files,
-    compatibility: { family: FAMILY, route: route.path, composer: composer.path, header: header.path } };
+    compatibility: { family: FAMILY, route: route.path, composer: composer.path, header: header.path,
+      reasoning: reasoning.compatibility } };
 }

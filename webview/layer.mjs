@@ -78,6 +78,7 @@ class Navigation {
     });
     this.rail.append(header, controls, this.status, this.list, footer, this.resizeHandle);
     document.body.append(this.rail); document.body.classList.add('vcl-enabled');
+    this.bridge.setReasoningEnabled(true);
     this.cleanups.push(this.bridge.subscribe(({ route }) => this.onRoute(route)));
     this.cleanups.push(this.bridge.setNewChatHandler(() => {
       if (this.draftProjectCwd !== null) this.newProjectChat(this.draftProjectCwd);
@@ -267,6 +268,7 @@ class Navigation {
   dispose() {
     if (this.disposed) return;
     this.disposed = true; this.abort.abort(); clearTimeout(this.refreshTimer); clearTimeout(this.saveTimer);
+    this.bridge.setReasoningEnabled(false);
     for (const cleanup of this.cleanups) cleanup();
     this.rail?.remove(); document.body.classList.remove('vcl-enabled'); document.body.style.removeProperty('--vcl-rail-width');
     this.client.dispose();
