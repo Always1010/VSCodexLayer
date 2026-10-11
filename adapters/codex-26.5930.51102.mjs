@@ -3,6 +3,7 @@ import { fileURLToPath } from 'node:url';
 import { extensionRoot, readOriginal } from '../lib/patch-engine.mjs';
 import { patchProjectCreationMembership } from './codex-compatible.mjs';
 import { buildReasoningPatchFiles } from './reasoning.mjs';
+import { buildChatMenuPatch } from './chat-menu.mjs';
 
 export const VERSION = '26.5930.51102';
 export const ADAPTER = `codex-${VERSION}-v5`;
@@ -128,6 +129,9 @@ export async function buildPatchPlan(directory) {
     'onClick:n,"aria-label":a,"data-vcl-chat-back":true,children:o');
   const reasoning = await buildReasoningPatchFiles(directory);
   originals.push(...reasoning.files);
+  const menu = await buildChatMenuPatch(directory, originals[3].content);
+  originals[3].content = menu.header;
+  originals.push(menu.file);
   const assets = [
     ['runtime/host.cjs', 'out/vscodex-layer-host.cjs'],
     ['webview/bootstrap.js', 'webview/vscodex-layer/bootstrap.js'],
@@ -142,5 +146,5 @@ export async function buildPatchPlan(directory) {
       content: await fs.readFile(fileURLToPath(new URL(`../${source}`, import.meta.url))) });
   }
   return { adapter: ADAPTER, extensionVersion: VERSION, files: originals,
-    compatibility: { reasoning: reasoning.compatibility } };
+    compatibility: { reasoning: reasoning.compatibility, chatMenu: menu.compatibility } };
 }

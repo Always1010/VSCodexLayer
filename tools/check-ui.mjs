@@ -52,7 +52,38 @@ setTimeout(()=>window.postMessage({type:'vscodex-layer/response',id:message.id,r
 <link rel="stylesheet" href="/webview/layer.css"><script src="/webview/bootstrap.js"></script>
 <script type="module" src="/webview/layer.mjs"></script>
 </head><body><main id="root"><header><button data-vcl-chat-back aria-label="返回">←</button><span id="native-title"></span></header><div data-vcl-home-history>聊天 · 最近聊天 · 查看全部</div><article><h1>右侧保留官方聊天界面</h1><p>这里使用模拟聊天区域检查导航布局。实际增强复用官方消息、输入框、模型选择、工具执行和审批。</p><p>选择左侧聊天，在同一个页面切换。项目可以折叠，支持全部项目和当前项目筛选。</p></article><textarea id="native-composer" aria-label="聊天输入框">未发送的草稿</textarea><div class="note">界面验证示意 · 模拟数据</div></main>
-<script type="module">window.nativeRoot=document.getElementById('root');window.nativeApi=acquireVsCodeApi();mockNavigate('/');nativeApi.postMessage({type:'ready'});</script>
+<script type="module">
+window.nativeRoot=document.getElementById('root');window.nativeApi=acquireVsCodeApi();mockNavigate('/');nativeApi.postMessage({type:'ready'});
+window.mockActionCalls=[];window.mockArchiveFailure=false;
+__vscodexLayerBridge.registerThreadMenuSurface({});
+__vscodexLayerBridge.subscribeThreadMenu(()=>{
+  document.querySelector('.mock-native-menu')?.remove();
+  const target=__vscodexLayerBridge.threadMenuTarget();if(!target)return;
+  const trigger=document.createElement('button');trigger.dataset.state='closed';trigger.setAttribute('aria-expanded','false');
+  const close=()=>{trigger.dataset.state='closed';trigger.setAttribute('aria-expanded','false');document.querySelector('.mock-native-menu')?.remove();trigger.focus()};
+  trigger.onkeydown=event=>{
+    if(!['ArrowDown','Enter'].includes(event.key))return;event.preventDefault();
+    if(trigger.dataset.state==='open'){close();return}
+    trigger.dataset.state='open';trigger.setAttribute('aria-expanded','true');
+    const menu=document.createElement('div');menu.className='mock-native-menu';menu.setAttribute('role','menu');
+    const rect=target.container.getBoundingClientRect();Object.assign(menu.style,{position:'fixed',left:Math.max(0,Math.min(rect.left,innerWidth-210))+'px',top:Math.max(0,Math.min(rect.bottom,innerHeight-180))+'px',width:'210px',padding:'8px',zIndex:100,background:'white',border:'1px solid #ddd'});
+    for(const [id,label] of [['rename-thread','重命名'],['share-thread','分享'],['copy-deeplink','复制深度链接'],['copy-conversation-markdown','复制为 Markdown'],['copy-working-directory','复制工作目录'],['archive-thread','归档']]){
+      const button=document.createElement('button');button.setAttribute('role','menuitem');button.dataset.action=id;button.textContent=label;button.style.display='block';
+      button.onclick=()=>{mockActionCalls.push({id,threadId:target.thread.id});close();
+        if(id==='rename-thread'){const chat=mockThreads.find(t=>t.id===target.thread.id);chat.title='重命名后的聊天';window.postMessage({type:'vscodex-layer/event',event:'threads-changed'},location.origin)}
+        if(id==='archive-thread'){
+          if(mockArchiveFailure){document.getElementById('native-title').textContent='归档失败';return}
+          mockThreads=mockThreads.filter(t=>t.id!==target.thread.id);__vscodexLayerBridge.threadArchived(target.thread.id);
+        }
+      };menu.append(button);
+    }
+    menu.onkeydown=event=>{const buttons=[...menu.querySelectorAll('button')];const index=buttons.indexOf(document.activeElement);
+      if(event.key==='Escape'){event.preventDefault();close()}
+      if(['ArrowDown','ArrowUp'].includes(event.key)){event.preventDefault();buttons[(index+(event.key==='ArrowDown'?1:buttons.length-1))%buttons.length].focus()}
+    };document.body.append(menu);menu.querySelector('button').focus();
+  };target.container.replaceChildren(trigger);
+});
+</script>
 </body></html>`;
 const allowed = new Set(['bootstrap.js', 'client.mjs', 'core.mjs', 'reading.mjs', 'layer.mjs', 'layer.css']);
 const server = http.createServer(async (request, response) => {
@@ -342,13 +373,51 @@ try {
   await evaluate(`document.querySelector('[data-vcl-key="pin:d:/other/project"]').click();document.querySelector('[data-vcl-key="pin:d:/wrk/project"]').click()`);
   await waitFor(`mockState.pinnedProjects?.length===0`);
   await assertBrowser(`document.querySelector('.vcl-project-heading').dataset.vclKey==='project:d:/wrk/vscodexlayer' && !document.querySelector('[data-vcl-key="pin:"]')`, '取消置顶未恢复排序或未分类可置顶');
+  await evaluate(`document.querySelector('[data-vcl-key="thread:thread-0"]').click()`);
+  await waitFor(`mockRoute==='/local/thread-0'`);
+  await evaluate(`window.postMessage({type:'vscodex-layer/event',event:{type:'thread-activity',threadId:'thread-8',phase:'completed',status:'idle'}},location.origin)`);
+  await waitFor(`document.querySelector('[data-vcl-key="thread:thread-8"] .vcl-attention')`);
+  await evaluate(`document.querySelector('[data-vcl-key="more:thread-8"]').click()`);
+  await waitFor(`document.querySelector('.mock-native-menu')`);
+  await assertBrowser(`mockRoute==='/local/thread-0' && document.querySelector('[data-vcl-key="thread:thread-8"] .vcl-attention')`, '打开其他聊天菜单切换聊天或清除蓝点');
+  await send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape' }, sessionId);
+  await send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Escape', code: 'Escape' }, sessionId);
+  await waitFor(`!document.querySelector('.mock-native-menu') && document.activeElement.dataset.vclKey==='more:thread-8'`);
+  await evaluate(`document.querySelector('[data-vcl-key="more:thread-8"]').dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,cancelable:true,clientX:innerWidth-2,clientY:innerHeight-2}))`);
+  await waitFor(`document.querySelector('.mock-native-menu')`);
+  await assertBrowser(`(()=>{const r=document.querySelector('.mock-native-menu').getBoundingClientRect();return r.right<=innerWidth&&r.bottom<=innerHeight})()`, '菜单越过视口边界');
+  await evaluate(`document.querySelector('[data-action="rename-thread"]').click()`);
+  await waitFor(`document.querySelector('[data-vcl-key="thread:thread-8"] .vcl-label').textContent==='重命名后的聊天'`);
+  await assertBrowser(`mockRoute==='/local/thread-0' && mockActionCalls.at(-1).threadId==='thread-8'`, '重命名错误聊天或切换右侧');
+  await evaluate(`document.querySelector('[data-vcl-key="more:thread-8"]').click()`);
+  await waitFor(`document.querySelector('.mock-native-menu')`);
+  await evaluate(`document.querySelector('[aria-label="刷新聊天列表"]').click()`);
+  await waitFor(`!document.querySelector('[aria-label="刷新聊天列表"]').disabled`);
+  await evaluate(`document.querySelector('[data-action="copy-working-directory"]').click()`);
+  await assertBrowser(`mockActionCalls.at(-1).threadId==='thread-8' && mockRoute==='/local/thread-0'`, '刷新后菜单操作对象改变');
+  await evaluate(`mockArchiveFailure=true;document.querySelector('[data-vcl-key="more:thread-8"]').click()`);
+  await waitFor(`document.querySelector('.mock-native-menu')`);
+  await evaluate(`document.querySelector('[data-action="archive-thread"]').click()`);
+  await assertBrowser(`document.querySelector('[data-vcl-key="thread:thread-8"]') && mockRoute==='/local/thread-0' && document.getElementById('native-title').textContent==='归档失败'`, '归档失败仍删除聊天或改变右侧');
+  await evaluate(`mockArchiveFailure=false;document.querySelector('[data-vcl-key="more:thread-8"]').click()`);
+  await waitFor(`document.querySelector('.mock-native-menu')`);
+  await evaluate(`document.querySelector('[data-action="archive-thread"]').click()`);
+  await waitFor(`!document.querySelector('[data-vcl-key="thread:thread-8"]')`);
+  await assertBrowser(`mockRoute==='/local/thread-0'`, '归档其他聊天切换了当前聊天');
+  await evaluate(`document.querySelector('[data-vcl-key="more:thread-0"]').focus()`);
+  await send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 }, sessionId);
+  await send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 }, sessionId);
+  await waitFor(`document.querySelector('.mock-native-menu')`);
+  await evaluate(`document.querySelector('[data-action="archive-thread"]').click()`);
+  await waitFor(`new URL(mockRoute,location.origin).searchParams.get('vclProjectCwd')==='D:/WRK/VSCodexLayer'`);
+  await assertBrowser(`document.getElementById('native-composer').value==='当前项目的草稿' && !document.querySelector('[data-vcl-key="thread:thread-0"]')`, '归档当前聊天未返回草稿或丢失草稿');
   await screenshot('navigation-project-new-chat.png');
   await send('Emulation.setDeviceMetricsOverride', { width: 480, height: 800, deviceScaleFactor: 1, mobile: false }, sessionId);
   await waitFor(`!document.getElementById('vcl-navigation').classList.contains('vcl-collapsed')`);
   await toggleShortcut();
   await waitFor(`document.getElementById('vcl-navigation')?.classList.contains('vcl-collapsed')`);
   await screenshot('navigation-narrow.png');
-  console.log('无头界面检查通过：提醒与结束蓝点、折叠项目汇总、未读保存与查看清除，以及项目新建、草稿隔离、搜索筛选和导航布局。');
+  console.log('无头界面检查通过：项目置顶及恢复、空项目、原生菜单入口、右键与键盘、焦点、指定聊天操作、失败保留、归档返回草稿，以及现有导航、提醒、搜索与草稿隔离。');
   console.log(`模拟界面截图：${output}`);
   }
 } finally {
