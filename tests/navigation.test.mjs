@@ -65,11 +65,11 @@ test('Windows 路径规范化、同名项目和多根当前项目正确区分', 
   const folders = [{ name: 'Project', path: 'D:\\WRK\\Project\\' }, { name: 'Empty', path: 'D:/empty' }];
   const all = groupThreads(threads, folders);
   assert.equal(all.length, 4);
-  assert.deepEqual(all.filter((group) => group.current).map((group) => group.key), ['d:/wrk/project', 'd:/empty']);
+  assert.deepEqual(all.filter((group) => group.current).map((group) => group.key), ['d:/empty', 'd:/wrk/project']);
   assert.equal(all.at(-1).name, '未分类');
   const current = groupThreads(threads, folders, { mode: 'current' });
   assert.equal(current.length, 2);
-  assert.equal(current[1].threads.length, 0);
+  assert.equal(current.find((group) => group.path === 'D:/empty').threads.length, 0);
   assert.equal(groupThreads(threads, [], { mode: 'current' }).length, 0);
 });
 
@@ -112,6 +112,29 @@ test('项目置顶顺序稳定，空项目保留并遵循当前筛选和搜索',
   assert.equal(groupThreads(threads, folders)[0].path, '/work/Project', '取消置顶恢复原排序');
   assert.equal(groupThreads([], [], { pinnedProjects: [{ path: 'D:/Project', name: 'First' },
     { path: 'd:\\Project\\', name: 'Duplicate' }] }).length, 1, 'Windows 同目录不得重复置顶');
+});
+
+test('聊天按创建时间固定，活动、标题、分页顺序和搜索不改变位置', () => {
+  const threads = [
+    { id: 'c', title: '聊天 C', cwd: '/b/Project', createdAt: 30, updatedAt: 30 },
+    { id: 'a', title: '聊天 A', cwd: '/b/Project', createdAt: 10, updatedAt: 100 },
+    { id: 'b', title: '聊天 B', cwd: '/b/Project', createdAt: 20, updatedAt: 20 },
+    { id: 'other', title: '其他', cwd: '/a/Project', createdAt: 1, updatedAt: 1 },
+  ];
+  const ids = (values, options) => groupThreads(values, [], options).find((group) => group.path === '/b/Project').threads.map((thread) => thread.id);
+  assert.deepEqual(ids(threads), ['a', 'b', 'c']);
+  const changed = threads.map((thread) => thread.id === 'b' ? { ...thread, updatedAt: 9999, status: 'active', title: '聊天 B 改名' } : thread).reverse();
+  assert.deepEqual(ids(changed), ['a', 'b', 'c']);
+  assert.deepEqual(ids(changed, { query: '聊天' }), ['a', 'b', 'c']);
+  assert.deepEqual(ids([...changed, { id: 'd', title: '新增', cwd: '/b/Project', createdAt: 40 }]), ['a', 'b', 'c', 'd']);
+  assert.deepEqual(ids(changed.filter((thread) => thread.id !== 'b')), ['a', 'c']);
+  assert.deepEqual(groupThreads(changed).map((group) => group.path), ['/a/Project', '/b/Project'], '同名项目按路径固定，不随活动移动');
+  const uncertain = [
+    { id: 'z', createdAt: 0, updatedAt: 999 }, { id: 'y', createdAt: NaN },
+    { id: 'x', createdAt: Infinity }, { id: 'b', createdAt: 5 }, { id: 'a', createdAt: 5 },
+  ].map((thread) => ({ ...thread, cwd: '/b/Project', title: thread.id }));
+  assert.deepEqual(ids(uncertain), ['a', 'b', 'x', 'y', 'z']);
+  assert.deepEqual(ids(uncertain.reverse()), ['a', 'b', 'x', 'y', 'z']);
 });
 
 test('读取全部分页并去重，拒绝循环游标和中途取消', async () => {

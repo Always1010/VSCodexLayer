@@ -185,7 +185,6 @@ class Navigation {
         signal: this.abort.signal,
         onPage: (partial) => {
           this.status.textContent = `正在读取聊天… ${partial.length}`;
-          if (!this.hasLoaded) { this.threads = partial; this.render(); }
         },
       });
       if (this.disposed) return;
@@ -274,6 +273,7 @@ class Navigation {
   }
   render() {
     if (this.disposed) return;
+    const scrollTop = this.list.scrollTop;
     const focused = document.activeElement?.closest('[data-vcl-key]')?.dataset.vclKey;
     const groups = groupThreads(this.threads, this.info.folders, {
       mode: this.state.mode, query: this.query, pinnedProjects: this.state.pinnedProjects,
@@ -354,6 +354,7 @@ class Navigation {
     if (!groups.length) fragment.append(element('div', 'vcl-empty', this.query ? '没有匹配的项目或聊天'
       : this.state.mode === 'current' && !this.info.folders.length ? '当前窗口没有本地项目' : '暂无聊天'));
     this.list.replaceChildren(fragment); this.count.textContent = `${groups.length} 个项目 · ${visibleThreads} 个聊天`;
+    this.list.scrollTop = scrollTop;
     if (focused) [...this.list.querySelectorAll('[data-vcl-key]')].find((node) => node.dataset.vclKey === focused)?.focus({ preventScroll: true });
   }
   activityDot({ kind, label }) {
