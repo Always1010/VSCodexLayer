@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { normalizePath, groupThreads, routeThreadId, loadAllThreads } from '../webview/core.mjs';
+import { normalizePath, projectName, groupThreads, routeThreadId, loadAllThreads } from '../webview/core.mjs';
 
 test('Windows 路径规范化、同名项目和多根当前项目正确区分', () => {
   assert.equal(normalizePath('D:\\WRK\\Project\\'), normalizePath('file:///d:/WRK/Project'));
@@ -19,6 +19,17 @@ test('Windows 路径规范化、同名项目和多根当前项目正确区分', 
   assert.equal(current.length, 2);
   assert.equal(current[1].threads.length, 0);
   assert.equal(groupThreads(threads, [], { mode: 'current' }).length, 0);
+});
+
+test('Linux SSH 项目保持大小写和反斜线，当前项目只匹配完整路径', () => {
+  const paths = ['/home/ubuntu/Project', '/home/ubuntu/project', '/home/ubuntu/a\\b', '/home/ubuntu/a/b', '/home/ubuntu/Project '];
+  const threads = paths.map((cwd, index) => ({ id: String(index), title: '聊天', cwd }));
+  assert.equal(groupThreads(threads).length, 5);
+  assert.equal(projectName(paths[2]), 'a\\b');
+  assert.equal(normalizePath('file:///home/ubuntu/Project'), paths[0]);
+  const current = groupThreads(threads, [{ name: 'Project', path: `${paths[0]}/` }], { mode: 'current' });
+  assert.equal(current.length, 1);
+  assert.deepEqual(current[0].threads.map(({ id }) => id), ['0']);
 });
 
 test('项目搜索显示该项目聊天，聊天搜索只显示命中的条目', () => {

@@ -51,6 +51,12 @@ test('官方仅获取一次 API，草稿状态原样透传，路由观察错误�
   assert.equal(project.vclDraftKey, bridge.projectRoute('/', '/', '?vclProjectCwd=d%3A%2Fother%2Fproject%2F').vclDraftKey);
   assert.notEqual(project.vclDraftKey, bridge.projectRoute('/', '/', '?vclProjectCwd=D%3A%5CCurrent%5CProject').vclDraftKey);
   assert.notEqual(project.vclDraftKey, bridge.projectRoute('/extension/panel/new', '/', '?vclProjectCwd=D%3A%5COther%5CProject').vclDraftKey);
+  const linuxDraft = (cwd, pathname = '/') => bridge.projectRoute(pathname, '/', `?vclProjectCwd=${encodeURIComponent(cwd)}`).vclDraftKey;
+  assert.notEqual(linuxDraft('/home/ubuntu/Project'), linuxDraft('/home/ubuntu/project'));
+  assert.equal(linuxDraft('/home/ubuntu/Project/'), linuxDraft('/home/ubuntu/Project'));
+  assert.notEqual(linuxDraft('/home/ubuntu/a\\b'), linuxDraft('/home/ubuntu/a/b'));
+  assert.notEqual(linuxDraft('/'), linuxDraft(''));
+  assert.notEqual(linuxDraft('/home/ubuntu/Project'), linuxDraft('/home/ubuntu/Project', '/extension/panel/new'));
   assert.equal(bridge.projectRoute('/local/another', '/', '?vclProjectCwd=D%3A%5COther%5CProject'), null);
   assert.equal(bridge.projectRoute('/', '/', ''), null);
   assert.equal(bridge.projectCwd({ kind: 'local', vclProjectCwd: 'D:\\Other' }), undefined);

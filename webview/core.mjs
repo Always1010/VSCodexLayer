@@ -1,6 +1,6 @@
 export function normalizePath(value) {
   if (typeof value !== 'string' || !value.trim()) return '';
-  let text = value.trim();
+  let text = value;
   if (/^file:/i.test(text)) {
     try {
       const url = new URL(text);
@@ -8,8 +8,8 @@ export function normalizePath(value) {
       text = text.replace(/^\/([a-z]:\/)/i, '$1');
     } catch { return ''; }
   }
-  text = text.replaceAll('\\', '/').replace(/^\/\/\?\/UNC\//i, '//').replace(/^\/\/\?\//, '');
-  const windows = /^[a-z]:\//i.test(text) || text.startsWith('//');
+  const windows = /^[a-z]:[\\/]/i.test(text.trim()) || text.trim().startsWith('\\\\') || text.trim().startsWith('//');
+  if (windows) text = text.trim().replaceAll('\\', '/').replace(/^\/\/\?\/UNC\//i, '//').replace(/^\/\/\?\//, '');
   const prefix = text.startsWith('//') ? '//' : text.startsWith('/') ? '/' : '';
   const parts = text.slice(prefix.length).split('/').filter(Boolean);
   const normalized = [];
@@ -26,7 +26,9 @@ export function normalizePath(value) {
 export function projectName(cwd) {
   const normalized = normalizePath(cwd);
   if (!normalized) return '未分类';
-  const parts = String(cwd).replaceAll('\\', '/').replace(/\/$/, '').split('/').filter(Boolean);
+  const original = String(cwd);
+  const windows = /^[a-z]:[\\/]/i.test(original) || original.startsWith('\\\\') || original.startsWith('//');
+  const parts = (windows ? original.replaceAll('\\', '/') : original).replace(/\/$/, '').split('/').filter(Boolean);
   return parts.at(-1) || normalized;
 }
 
