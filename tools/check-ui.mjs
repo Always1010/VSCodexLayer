@@ -323,6 +323,25 @@ try {
   await assertBrowser(`document.getElementById('native-composer').value==='当前项目的草稿'`, '发送其他项目后当前项目草稿被清理');
   await evaluate(`mockThreads.push({id:'unclassified',title:'未分类聊天',cwd:null});document.querySelector('[aria-label="刷新聊天列表"]').click()`);
   await waitFor(`document.querySelector('[data-vcl-key="new:"]')?.disabled`);
+  await evaluate(`document.querySelector('[data-vcl-key="pin:d:/other/project"]').click()`);
+  await waitFor(`mockState.pinnedProjects?.length===1`);
+  await assertBrowser(`document.querySelector('.vcl-project-heading').dataset.vclKey==='project:d:/other/project'
+    && document.querySelector('[data-vcl-key="pin:d:/other/project"]').getAttribute('aria-pressed')==='true'
+    && new URL(mockRoute,location.origin).searchParams.get('vclProjectCwd')==='D:/WRK/VSCodexLayer'`, '置顶未生效或切换右侧聊天');
+  await evaluate(`document.querySelector('[data-vcl-key="pin:d:/wrk/project"]').click()`);
+  await waitFor(`mockState.pinnedProjects?.length===2`);
+  await assertBrowser(`[...document.querySelectorAll('.vcl-project-heading')].slice(0,2).map(n=>n.dataset.vclKey).join('|')==='project:d:/other/project|project:d:/wrk/project'`, '新置顶项目扰乱已有顺序');
+  await evaluate(`document.querySelector('[aria-label="返回原版界面"]').click()`);
+  await waitFor(`document.getElementById('vcl-launcher')`);
+  await evaluate(`document.getElementById('vcl-launcher').click()`);
+  await waitFor(`document.querySelector('[data-vcl-key="pin:d:/other/project"]')?.getAttribute('aria-pressed')==='true'`);
+  await waitFor(`!document.querySelector('[aria-label="刷新聊天列表"]').disabled`);
+  await evaluate(`mockThreads=mockThreads.filter(t=>t.cwd!=='D:/Other/Project');document.querySelector('[aria-label="刷新聊天列表"]').click()`);
+  await waitFor(`document.querySelector('[data-vcl-key="project:d:/other/project"] .vcl-group-count')?.textContent==='0'`);
+  await assertBrowser(`document.querySelector('[data-vcl-key="project:d:/other/project"]') && document.querySelector('[data-vcl-key="new:d:/other/project"]') && document.querySelector('[data-vcl-key="project:d:/other/project"] .vcl-group-count').textContent==='0'`, '置顶空项目丢失');
+  await evaluate(`document.querySelector('[data-vcl-key="pin:d:/other/project"]').click();document.querySelector('[data-vcl-key="pin:d:/wrk/project"]').click()`);
+  await waitFor(`mockState.pinnedProjects?.length===0`);
+  await assertBrowser(`document.querySelector('.vcl-project-heading').dataset.vclKey==='project:d:/wrk/vscodexlayer' && !document.querySelector('[data-vcl-key="pin:"]')`, '取消置顶未恢复排序或未分类可置顶');
   await screenshot('navigation-project-new-chat.png');
   await send('Emulation.setDeviceMetricsOverride', { width: 480, height: 800, deviceScaleFactor: 1, mobile: false }, sessionId);
   await waitFor(`!document.getElementById('vcl-navigation').classList.contains('vcl-collapsed')`);

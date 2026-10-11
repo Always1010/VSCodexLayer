@@ -10,6 +10,7 @@ const icons = {
   chevron: ['m9 6 6 6-6 6'], search: ['m21 21-4.4-4.4', 'M19 11a8 8 0 1 1-16 0 8 8 0 0 1 16 0Z'],
   back: ['m12 5-7 7 7 7', 'M5 12h15'],
   plus: ['M12 5v14', 'M5 12h14'],
+  pin: ['M16 3l5 5-4 1-4 4-1 4-5-5 4-1 4-4Z', 'm2 22 5-5'],
 };
 
 function element(tag, className, text) {
@@ -188,10 +189,19 @@ class Navigation {
     if (this.disposed) return;
     this.status.classList.add('vcl-error'); this.status.textContent = error.message || '聊天列表读取失败，可刷新重试或返回原版界面。';
   }
+  toggleProjectPin(group) {
+    const pins = this.state.pinnedProjects ?? [];
+    this.state.pinnedProjects = group.pinned
+      ? pins.filter((project) => normalizePath(project.path) !== group.key)
+      : [...pins, { path: group.path, name: group.name }];
+    this.render(); this.persist();
+  }
   render() {
     if (this.disposed) return;
     const focused = document.activeElement?.closest('[data-vcl-key]')?.dataset.vclKey;
-    const groups = groupThreads(this.threads, this.info.folders, { mode: this.state.mode, query: this.query });
+    const groups = groupThreads(this.threads, this.info.folders, {
+      mode: this.state.mode, query: this.query, pinnedProjects: this.state.pinnedProjects,
+    });
     const fragment = document.createDocumentFragment(); let visibleThreads = 0;
     this.projectContext.textContent = this.projectCwd === null ? '' : `新聊天 · ${projectName(this.projectCwd)}`;
     this.projectContext.title = this.projectCwd ?? '';
@@ -240,7 +250,14 @@ class Navigation {
       const create = iconButton('plus', group.path ? `在 ${group.name} 中新建聊天` : '无法新建聊天：未确定项目目录', () => this.newProjectChat(group.path));
       create.dataset.vclKey = `new:${group.key}`; create.classList.add('vcl-new-chat');
       create.disabled = !group.path || this.creating;
-      projectRow.append(heading, create); section.append(projectRow, children); fragment.append(section);
+      projectRow.append(heading);
+      if (group.path) {
+        const pin = iconButton('pin', group.pinned ? '取消置顶项目' : '置顶项目', () => this.toggleProjectPin(group));
+        pin.dataset.vclKey = `pin:${group.key}`; pin.classList.add('vcl-project-pin');
+        pin.classList.toggle('vcl-pinned', group.pinned); pin.setAttribute('aria-pressed', String(group.pinned));
+        projectRow.append(pin);
+      }
+      projectRow.append(create); section.append(projectRow, children); fragment.append(section);
     }
     if (!groups.length) fragment.append(element('div', 'vcl-empty', this.query ? '没有匹配的项目或聊天'
       : this.state.mode === 'current' && !this.info.folders.length ? '当前窗口没有本地项目' : '暂无聊天'));

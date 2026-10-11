@@ -93,6 +93,27 @@ test('项目搜索显示该项目聊天，聊天搜索只显示命中的条目',
   assert.equal(routeThreadId('/settings'), null);
 });
 
+test('项目置顶顺序稳定，空项目保留并遵循当前筛选和搜索', () => {
+  const threads = [
+    { id: 'current', title: '当前聊天', cwd: '/work/Project', updatedAt: 100 },
+    { id: 'other', title: '其他聊天', cwd: '/other/Project', updatedAt: 2 },
+    { id: 'loose', title: '无目录', cwd: null, updatedAt: 200 },
+  ];
+  const folders = [{ name: 'Project', path: '/work/Project' }];
+  const pinnedProjects = [{ path: '/other/Project', name: 'Project' }, { path: '/empty', name: 'Empty' }];
+  const groups = groupThreads(threads, folders, { pinnedProjects });
+  assert.deepEqual(groups.map((group) => group.path), ['/other/Project', '/empty', '/work/Project', null]);
+  assert.equal(groups[1].total, 0);
+  assert.deepEqual(groupThreads([], folders, { pinnedProjects }).map((group) => group.path),
+    ['/other/Project', '/empty', '/work/Project'], '所有聊天归档后仍保留置顶目录');
+  assert.deepEqual(groupThreads(threads, folders, { pinnedProjects, mode: 'current' }).map((group) => group.path), ['/work/Project']);
+  assert.deepEqual(groupThreads(threads, folders, { pinnedProjects, query: '当前聊天' }).map((group) => group.path), ['/work/Project']);
+  assert.equal(groupThreads(threads, folders, { pinnedProjects, query: 'empty' })[0].total, 0);
+  assert.equal(groupThreads(threads, folders)[0].path, '/work/Project', '取消置顶恢复原排序');
+  assert.equal(groupThreads([], [], { pinnedProjects: [{ path: 'D:/Project', name: 'First' },
+    { path: 'd:\\Project\\', name: 'Duplicate' }] }).length, 1, 'Windows 同目录不得重复置顶');
+});
+
 test('读取全部分页并去重，拒绝循环游标和中途取消', async () => {
   const calls = [];
   const result = await loadAllThreads(async (cursor) => {

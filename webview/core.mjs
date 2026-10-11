@@ -32,8 +32,16 @@ export function projectName(cwd) {
   return parts.at(-1) || normalized;
 }
 
-export function groupThreads(threads, folders = [], { mode = 'all', query = '' } = {}) {
+export function groupThreads(threads, folders = [], { mode = 'all', query = '', pinnedProjects = [] } = {}) {
   const groups = new Map();
+  const pins = new Map();
+  for (const project of pinnedProjects) {
+    const key = normalizePath(project?.path);
+    if (!key || pins.has(key)) continue;
+    pins.set(key, pins.size);
+    groups.set(key, { key, name: project.name || projectName(project.path), path: project.path,
+      current: false, threads: [], latest: 0 });
+  }
   const current = new Set(folders.map((folder) => normalizePath(folder.path)).filter(Boolean));
   for (const folder of folders) {
     const key = normalizePath(folder.path);
@@ -48,17 +56,20 @@ export function groupThreads(threads, folders = [], { mode = 'all', query = '' }
     group.threads.push(thread);
     group.latest = Math.max(group.latest, thread.updatedAt || thread.createdAt || 0);
   }
+  for (const group of groups.values()) group.current = current.has(group.key);
   const term = query.trim().toLocaleLowerCase();
   return [...groups.values()]
     .filter((group) => mode !== 'current' || group.current)
     .map((group) => {
       const projectMatches = !term || `${group.name} ${group.path ?? ''}`.toLocaleLowerCase().includes(term);
       const visible = projectMatches ? group.threads : group.threads.filter((thread) => thread.title.toLocaleLowerCase().includes(term));
-      return { ...group, total: group.threads.length, threads: [...visible].sort((a, b) =>
+      return { ...group, pinned: pins.has(group.key), total: group.threads.length, threads: [...visible].sort((a, b) =>
         (b.updatedAt || b.createdAt || 0) - (a.updatedAt || a.createdAt || 0)) };
     })
     .filter((group) => !term || `${group.name} ${group.path ?? ''}`.toLocaleLowerCase().includes(term) || group.threads.length)
-    .sort((a, b) => Number(b.current) - Number(a.current) || Number(!a.key) - Number(!b.key)
+    .sort((a, b) => Number(b.pinned) - Number(a.pinned)
+      || (a.pinned && b.pinned ? pins.get(a.key) - pins.get(b.key) : 0)
+      || Number(b.current) - Number(a.current) || Number(!a.key) - Number(!b.key)
       || b.latest - a.latest || a.name.localeCompare(b.name, 'zh-CN'));
 }
 

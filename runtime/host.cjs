@@ -9,11 +9,21 @@ const EVENT = 'vscodex-layer/event';
 const STATE_KEY = 'vscodexLayer.navigationState.v1';
 
 function cleanState(value = {}) {
+  const pins = new Map();
+  for (const project of Array.isArray(value.pinnedProjects) ? value.pinnedProjects : []) {
+    const directory = project?.path;
+    if (typeof directory !== 'string' || directory.length > 4096 || directory.includes('\0')
+      || !/^(?:\/|[a-z]:[\\/]|\\\\)/i.test(directory) || pins.has(directory)) continue;
+    pins.set(directory, { path: directory,
+      name: typeof project.name === 'string' ? project.name.slice(0, 200) : '' });
+    if (pins.size === 2000) break;
+  }
   return {
     mode: value.mode === 'current' ? 'current' : 'all',
     width: Math.min(420, Math.max(180, Number(value.width) || 250)),
     collapsed: typeof value.collapsed === 'boolean' ? value.collapsed : null,
     groups: Array.isArray(value.groups) ? value.groups.filter((item) => typeof item === 'string' && item.length <= 4096).slice(0, 2000) : [],
+    pinnedProjects: [...pins.values()],
     disabled: value.disabled === true,
     unread: Array.isArray(value.unread) ? value.unread.filter((id) => typeof id === 'string' && /^[\w-]{1,200}$/.test(id)).slice(-2000) : [],
   };

@@ -35,6 +35,15 @@ function fixture(platform = process.platform) {
 }
 const flush = () => new Promise((resolve) => setImmediate(resolve));
 
+test('项目置顶偏好保存并过滤无效目录，旧偏好正常读取', async (t) => {
+  const f = fixture(); t.after(() => f.host.dispose());
+  assert.deepEqual((await f.request('init')).result.state.pinnedProjects, []);
+  const pinnedProjects = [{ path: '/home/Project', name: 'Project' }, { path: 'D:\\Other\\Project', name: '同名目录' }];
+  await f.request('save-state', { state: { pinnedProjects: [...pinnedProjects,
+    { path: '/home/Project', name: '重复' }, { path: 'relative', name: '无效' }, { path: '/a\0b' }, null] } });
+  assert.deepEqual((await f.request('init')).result.state.pinnedProjects, pinnedProjects);
+});
+
 test('独立摘要使用内存 Markdown 阅读视图，实时更新隔离且不请求模型', async (t) => {
   const f = fixture(); t.after(() => f.host.dispose());
   let documentProvider;
