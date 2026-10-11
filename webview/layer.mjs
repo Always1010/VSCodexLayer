@@ -11,6 +11,7 @@ const icons = {
   back: ['m12 5-7 7 7 7', 'M5 12h15'],
   plus: ['M12 5v14', 'M5 12h14'],
   pin: ['M16 3l5 5-4 1-4 4-1 4-5-5 4-1 4-4Z', 'm2 22 5-5'],
+  more: ['M5 12h.01', 'M12 12h.01', 'M19 12h.01'],
 };
 
 function element(tag, className, text) {
@@ -31,6 +32,12 @@ function iconButton(name, label, callback) {
   button.type = 'button'; button.title = label; button.setAttribute('aria-label', label);
   button.append(icon(name)); button.addEventListener('click', callback);
   return button;
+}
+function nativeMenuOpen(trigger) {
+  return trigger?.getAttribute('data-state') === 'open' || trigger?.getAttribute('aria-expanded') === 'true';
+}
+function nativeMenuKey(trigger, key) {
+  trigger?.dispatchEvent(new KeyboardEvent('keydown', { key, code: key, bubbles: true, cancelable: true }));
 }
 
 class Navigation {
@@ -68,6 +75,7 @@ class Navigation {
     this.status.setAttribute('role', 'status'); this.status.setAttribute('aria-live', 'polite');
     this.list = element('div', 'vcl-list'); this.list.setAttribute('aria-label', '项目和聊天');
     this.list.addEventListener('keydown', (event) => this.onListKey(event));
+    this.list.addEventListener('scroll', () => this.dismissNativeMenu());
     const footer = element('div', 'vcl-footer'); this.count = element('span', 'vcl-count');
     footer.append(this.count, iconButton('back', '返回原版界面', () => this.disable()));
     this.resizeHandle = element('div', 'vcl-resize'); this.resizeHandle.tabIndex = 0;
@@ -91,6 +99,19 @@ class Navigation {
       if (this.draftProjectCwd !== null) this.newProjectChat(this.draftProjectCwd);
       else this.client.request('new-chat', { path: this.draftPath }).catch((error) => this.showError(error));
     }));
+    this.cleanups.push(this.bridge.subscribeThreadArchived((threadId) => {
+      if (this.disposed) return;
+      this.threads = this.threads.filter((thread) => thread.id !== threadId);
+      this.activity.acknowledge(threadId); this.activity.statuses.delete(threadId);
+      if (this.active === threadId) {
+        if (this.draftProjectCwd !== null) this.newProjectChat(this.draftProjectCwd);
+        else this.client.request('new-chat', { path: this.draftPath }).catch((error) => this.showError(error));
+      }
+      this.render(); this.persist(); this.scheduleRefresh();
+    }));
+    this.cleanups.push(this.bridge.subscribeThreadMenuError((message) => {
+      this.closeMenuAnchor(); this.showError(new Error(`官方聊天菜单加载失败：${message}`));
+    }));
     this.cleanups.push(this.client.onEvent((event) => {
       if (event === 'workspace-changed') {
         this.client.request('init').then((next) => {
@@ -103,7 +124,9 @@ class Navigation {
         this.render(); this.persist();
       }
     }));
-    const resize = () => this.layout(); window.addEventListener('resize', resize);
+    const resize = () => {
+      this.dismissNativeMenu(); this.layout();
+    }; window.addEventListener('resize', resize);
     this.cleanups.push(() => window.removeEventListener('resize', resize));
     const keydown = (event) => {
       if (event.defaultPrevented || event.isComposing || !event.altKey || event.ctrlKey || event.metaKey || event.shiftKey
@@ -196,6 +219,59 @@ class Navigation {
       : [...pins, { path: group.path, name: group.name }];
     this.render(); this.persist();
   }
+  closeMenuAnchor() {
+    clearTimeout(this.menuTimer); this.menuObserver?.disconnect();
+    this.list?.querySelectorAll('.vcl-menu-open').forEach((row) => {
+      row.classList.remove('vcl-menu-open'); row.querySelector('.vcl-chat-more')?.setAttribute('aria-expanded', 'false');
+    });
+    this.bridge.closeThreadMenu(); this.menuAnchor?.remove();
+    this.menuAnchor = null; this.menuKey = null;
+  }
+  dismissNativeMenu() {
+    const trigger = this.menuAnchor?.querySelector('button');
+    if (nativeMenuOpen(trigger)) nativeMenuKey(trigger, 'Enter');
+  }
+  openChatMenu(thread, button, point) {
+    if (this.disposed) return;
+    if (document.querySelector('[role="dialog"], [aria-modal="true"]')) {
+      this.showError(new Error('请先完成或关闭当前对话框，再打开聊天操作。')); return;
+    }
+    this.dismissNativeMenu();
+    this.closeMenuAnchor();
+    const rect = button.getBoundingClientRect();
+    const anchor = element('div', 'vcl-menu-anchor');
+    anchor.style.left = `${Math.max(0, Math.min(point?.x ?? rect.left, window.innerWidth - 28))}px`;
+    anchor.style.top = `${Math.max(0, Math.min(point?.y ?? rect.top, window.innerHeight - 28))}px`;
+    document.body.append(anchor); this.menuAnchor = anchor; this.menuKey = `more:${thread.id}`;
+    let clicked = false; let opened = false;
+    const update = () => {
+      if (this.menuAnchor !== anchor || this.disposed) return;
+      const trigger = anchor.querySelector('button');
+      if (!trigger) return;
+      if (!clicked) {
+        clicked = true; clearTimeout(this.menuTimer);
+        requestAnimationFrame(() => { if (this.menuAnchor === anchor) nativeMenuKey(trigger, 'ArrowDown'); });
+      }
+      const isOpen = nativeMenuOpen(trigger);
+      if (isOpen) opened = true;
+      const currentButton = [...this.list.querySelectorAll('.vcl-chat-more')].find((node) => node.dataset.vclKey === this.menuKey);
+      currentButton?.setAttribute('aria-expanded', String(isOpen));
+      currentButton?.closest('.vcl-thread-row')?.classList.toggle('vcl-menu-open', isOpen);
+      if (opened && !isOpen) requestAnimationFrame(() => {
+        if (anchor.contains(document.activeElement)) currentButton?.focus({ preventScroll: true });
+      });
+    };
+    this.menuObserver = new MutationObserver(update);
+    this.menuObserver.observe(anchor, { childList: true, subtree: true, attributes: true, attributeFilter: ['data-state', 'aria-expanded'] });
+    try {
+      this.bridge.openThreadMenu(thread, anchor);
+      this.menuTimer = setTimeout(() => {
+        if (!clicked && this.menuAnchor === anchor) {
+          this.closeMenuAnchor(); this.showError(new Error('官方聊天菜单未能加载，可返回原版界面操作。'));
+        }
+      }, 4000);
+    } catch (error) { this.closeMenuAnchor(); this.showError(error); }
+  }
   render() {
     if (this.disposed) return;
     const focused = document.activeElement?.closest('[data-vcl-key]')?.dataset.vclKey;
@@ -229,6 +305,7 @@ class Navigation {
       if (!closed) {
         if (!group.threads.length) children.append(element('div', 'vcl-empty-project', '暂无聊天'));
         for (const thread of group.threads) {
+          const threadRow = element('div', `vcl-thread-row${this.active === thread.id ? ' vcl-selected' : ''}`);
           const row = element('button', `vcl-thread${this.active === thread.id ? ' vcl-selected' : ''}`);
           row.type = 'button'; row.dataset.vclKey = `thread:${thread.id}`;
           row.title = `${thread.title}\n${thread.cwd || '未分类'}`;
@@ -243,7 +320,22 @@ class Navigation {
             if (this.activity.acknowledge(thread.id)) { this.render(); this.persist(); }
             this.client.request('navigate', { threadId: thread.id }).catch((error) => this.showError(error));
           });
-          children.append(row);
+          const more = iconButton('more', '聊天操作', () => this.openChatMenu(thread, more));
+          more.addEventListener('keydown', (event) => {
+            if (event.isComposing || event.ctrlKey || event.metaKey || event.altKey
+              || !['Enter', ' ', 'ArrowDown'].includes(event.key)) return;
+            event.preventDefault(); event.stopPropagation();
+            if (!event.repeat) this.openChatMenu(thread, more);
+          });
+          more.dataset.vclKey = `more:${thread.id}`; more.classList.add('vcl-chat-more');
+          more.setAttribute('aria-haspopup', 'menu');
+          const menuOpen = this.menuKey === more.dataset.vclKey && nativeMenuOpen(this.menuAnchor?.querySelector('button'));
+          more.setAttribute('aria-expanded', String(menuOpen)); threadRow.classList.toggle('vcl-menu-open', menuOpen);
+          threadRow.addEventListener('contextmenu', (event) => {
+            event.preventDefault(); this.openChatMenu(thread, more,
+              event.clientX || event.clientY ? { x: event.clientX, y: event.clientY } : undefined);
+          });
+          threadRow.append(row, more); children.append(threadRow);
         }
       }
       const projectRow = element('div', 'vcl-project-row');
@@ -279,7 +371,8 @@ class Navigation {
       return;
     }
     if (event.key === 'ArrowLeft') { row.closest('.vcl-project')?.querySelector('.vcl-project-heading')?.focus(); return; }
-    const rows = [...this.list.querySelectorAll('button:not(:disabled)')]; const index = rows.indexOf(row);
+    const rows = [...this.list.querySelectorAll('button:not(:disabled):not(.vcl-chat-more)')];
+    const index = rows.indexOf(row.closest('.vcl-thread-row')?.querySelector('.vcl-thread') ?? row);
     const target = event.key === 'Home' ? 0 : event.key === 'End' ? rows.length - 1 : index + (event.key === 'ArrowUp' ? -1 : 1);
     rows[Math.min(rows.length - 1, Math.max(0, target))]?.focus();
   }
@@ -312,6 +405,7 @@ class Navigation {
   dispose() {
     if (this.disposed) return;
     this.disposed = true; this.abort.abort(); clearTimeout(this.refreshTimer); clearTimeout(this.saveTimer);
+    this.closeMenuAnchor();
     this.bridge.setReasoningEnabled(false);
     for (const cleanup of this.cleanups) cleanup();
     this.rail?.remove(); document.body.classList.remove('vcl-enabled'); document.body.style.removeProperty('--vcl-rail-width');

@@ -10,6 +10,7 @@ import { applyPatch, inspectPatch, readUnpatched, restorePatch, sha256 } from '.
 import { findExtension } from './layer.mjs';
 import { checkProjectSubmit } from './native-project-submit.mjs';
 import { checkNativeReasoning } from './native-reasoning.mjs';
+import { checkNativeChatMenu } from './native-chat-menu.mjs';
 
 const args = process.argv.slice(2);
 if (args.length && (args[0] !== '--extension' || args.length !== 2)) {
@@ -80,6 +81,7 @@ assert.equal((composer.match(/validateProject\(/g) ?? []).length, 1);
 assert.equal((header.match(/data-vcl-home-history/g) ?? []).length, 2);
 assert.equal((header.match(/data-vcl-chat-back/g) ?? []).length, 1);
 await checkNativeReasoning(plan);
+await checkNativeChatMenu(plan);
 
 const runtimeFiles = [];
 for (const name of await fs.readdir(path.join(directory, 'webview', 'assets'))) {
@@ -99,6 +101,9 @@ const fixture = await fs.mkdtemp(path.join(temporaryParent, 'vscodex-layer-compa
 if (!fixture.startsWith(`${temporaryParent}${path.sep}vscodex-layer-compatible-`)) throw new Error('临时验证目录异常。');
 try {
   await fs.copyFile(path.join(directory, 'package.json'), path.join(fixture, 'package.json'));
+  const framework = plan.compatibility.chatMenu.framework;
+  await fs.mkdir(path.dirname(path.join(fixture, framework)), { recursive: true });
+  await fs.writeFile(path.join(fixture, framework), await readUnpatched(directory, framework));
   for (const entry of plan.files.filter((file) => file.originalHash !== null)) {
     const target = path.join(fixture, entry.path);
     await fs.mkdir(path.dirname(target), { recursive: true });
@@ -127,5 +132,5 @@ try {
   for (const entry of plan.files.filter((file) => file.originalHash !== null)) {
     assert.equal(sha256(await fs.readFile(path.join(fixture, entry.path))), entry.originalHash);
   }
-  console.log(`官方 ${plan.extensionVersion} 兼容结构校验通过：${plan.compatibility.family}；推理摘要分类、原生展开／折叠与流式正文、开关恢复、动态资源、宿主初始化、SSH / WSL 边界、项目首条消息归属与目录、语法、临时副本应用、已安装补丁更新、重复应用和恢复均通过。实际插件未修改。`);
+  console.log(`官方 ${plan.extensionVersion} 兼容结构校验通过：${plan.compatibility.family}；原生聊天菜单与 Portal、指定聊天操作和运行中确认、推理摘要、宿主初始化、SSH / WSL 边界、项目首次发送、语法、临时副本更新、重复应用和恢复均通过。实际插件未修改。`);
 } finally { await fs.rm(fixture, { recursive: true, force: true }); }

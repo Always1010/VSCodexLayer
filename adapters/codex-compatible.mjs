@@ -3,6 +3,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { extensionRoot, readUnpatched, sha256 } from '../lib/patch-engine.mjs';
 import { buildReasoningPatchFiles } from './reasoning.mjs';
+import { buildChatMenuPatch } from './chat-menu.mjs';
 
 export const FAMILY = 'codex-webview-family-1';
 const identifier = String.raw`[A-Za-z_$][\w$]*`;
@@ -243,6 +244,10 @@ export async function buildCompatiblePatchPlan(directory) {
   }
   const reasoning = await buildReasoningPatchFiles(root);
   files.push(...reasoning.files);
+  const headerEntry = files.find((file) => file.path === header.path);
+  const menu = await buildChatMenuPatch(root, headerEntry.content);
+  headerEntry.content = menu.header;
+  files.push(menu.file);
   for (const [source, target] of [
     ['runtime/host.cjs', 'out/vscodex-layer-host.cjs'],
     ['webview/bootstrap.js', 'webview/vscodex-layer/bootstrap.js'],
@@ -255,5 +260,5 @@ export async function buildCompatiblePatchPlan(directory) {
     content: await fs.readFile(fileURLToPath(new URL(`../${source}`, import.meta.url))) });
   return { adapter: `${FAMILY}:${version}`, extensionVersion: version, files,
     compatibility: { family: FAMILY, route: route.path, composer: composer.path, header: header.path,
-      reasoning: reasoning.compatibility } };
+      reasoning: reasoning.compatibility, chatMenu: menu.compatibility } };
 }

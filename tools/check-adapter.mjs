@@ -8,6 +8,7 @@ import { findExtension } from './layer.mjs';
 import { buildPatchPlan, DRAFT_SOURCE } from '../adapters/codex-26.5930.51102.mjs';
 import { applyPatch, restorePatch, sha256, readOriginal } from '../lib/patch-engine.mjs';
 import { checkNativeReasoning } from './native-reasoning.mjs';
+import { checkNativeChatMenu } from './native-chat-menu.mjs';
 
 // Only read the real installation. Exercise mutations in a newly created fixture.
 const args = process.argv.slice(2);
@@ -16,6 +17,7 @@ const directory = args[1] ?? await findExtension();
 const plan = await buildPatchPlan(directory);
 new Script(plan.files.find((entry) => entry.path === 'out/extension.js').content);
 await checkNativeReasoning(plan);
+await checkNativeChatMenu(plan);
 // Exercise the exact supported native draft functions without importing the app or opening VS Code.
 const composerSource = plan.files.find((entry) => entry.path === DRAFT_SOURCE[0]).content;
 const routeSource = plan.files.find((entry) => entry.path === 'webview/assets/app-initial-3a0869cff48f.js').content;
@@ -147,6 +149,9 @@ const fixture = await fs.mkdtemp(path.join(temporaryParent, 'vscodex-layer-adapt
 if (!fixture.startsWith(`${temporaryParent}${path.sep}vscodex-layer-adapter-`)) throw new Error('临时验证目录异常。');
 try {
   await fs.copyFile(path.join(directory, 'package.json'), path.join(fixture, 'package.json'));
+  const framework = plan.compatibility.chatMenu.framework;
+  await fs.mkdir(path.dirname(path.join(fixture, framework)), { recursive: true });
+  await fs.writeFile(path.join(fixture, framework), await fs.readFile(path.join(directory, framework)));
   const dependency = path.join(fixture, DRAFT_SOURCE[0]);
   await fs.mkdir(path.dirname(dependency), { recursive: true });
   await fs.writeFile(dependency, await readOriginal(directory, ...DRAFT_SOURCE));

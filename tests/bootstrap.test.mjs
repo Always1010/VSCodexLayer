@@ -23,6 +23,39 @@ test('官方仅获取一次 API，草稿状态原样透传，路由观察错误�
   officialApi.setState({ draft: 'updated' });
   assert.equal(state.draft, 'updated');
   const bridge = context.__vscodexLayerBridge;
+  const container = { isConnected: true };
+  assert.throws(() => bridge.openThreadMenu({ id: 'other' }, container), /尚未就绪/);
+  const surface = {};
+  const releaseMenu = bridge.registerThreadMenuSurface(surface);
+  bridge.openThreadMenu({ id: 'other', title: '其他聊天', cwd: '/other' }, container);
+  assert.equal(bridge.threadMenuTarget().thread.id, 'other');
+  assert.equal(bridge.threadMenuTarget().thread.hostId, 'local');
+  const previousToken = bridge.threadMenuTarget().token;
+  let menuError;
+  const unsubscribeError = bridge.subscribeThreadMenuError((message) => { menuError = message; });
+  bridge.openThreadMenu({ id: 'next' }, container);
+  bridge.threadMenuError('旧菜单失败', previousToken);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(menuError, undefined, '旧菜单的异步失败不能关闭新菜单');
+  bridge.threadMenuError('当前失败', bridge.threadMenuTarget().token);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(menuError, '当前失败');
+  unsubscribeError();
+  const choose = () => {};
+  const items = bridge.filterThreadMenu([
+    { id: 'rename-thread', onSelect: choose }, { id: 'share-thread', enabled: false },
+    { id: 'copy', submenu: [{ id: 'copy-deeplink', onSelect: choose }, { id: 'delete-thread' }] },
+    { id: 'pin-thread' }, { id: 'archive-thread', onSelect: choose }, { id: 'delete-thread' },
+  ]);
+  assert.equal(items.map((item) => item.id).join(','), 'rename-thread,share-thread,copy,vcl-archive-separator,archive-thread');
+  assert.equal(items[0].onSelect, choose, '原生动作引用必须原样保留');
+  assert.equal(items[1].enabled, false, '保留原生能力限制');
+  assert.equal(items[2].submenu.length, 1);
+  let archived;
+  const unsubscribeArchived = bridge.subscribeThreadArchived((id) => { archived = id; });
+  bridge.threadArchived('other'); assert.equal(archived, 'other');
+  unsubscribeArchived(); bridge.threadArchived('current'); assert.equal(archived, 'other');
+  releaseMenu(); assert.equal(bridge.threadMenuTarget(), null);
   assert.equal(bridge.reasoningEnabled(), false);
   let reasoningChanges = 0;
   bridge.subscribeReasoning(() => { throw new Error('broken reasoning subscriber'); });

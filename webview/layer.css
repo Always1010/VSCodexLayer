@@ -80,6 +80,14 @@ body.vcl-enabled > #root {
 #vcl-navigation .vcl-current { padding: 0 4px; font-size: 10px; color: var(--vcl-muted); border: 1px solid var(--vcl-border); border-radius: 3px; white-space: nowrap; }
 #vcl-navigation .vcl-group-count { font-size: 11px; color: var(--vcl-muted); }
 #vcl-navigation .vcl-thread { padding-inline-start: 36px; font-size: 12px; }
+#vcl-navigation .vcl-thread-row { display: flex; align-items: center; border-radius: 6px; }
+#vcl-navigation .vcl-thread-row:hover { background: var(--vcl-hover); }
+#vcl-navigation .vcl-thread-row .vcl-thread { flex: 1; min-width: 0; width: auto; background: transparent; }
+#vcl-navigation .vcl-chat-more { flex: 0 0 24px; width: 24px; height: 28px; opacity: 0; }
+#vcl-navigation .vcl-thread-row:hover .vcl-chat-more,
+#vcl-navigation .vcl-thread-row:focus-within .vcl-chat-more,
+#vcl-navigation .vcl-menu-open .vcl-chat-more { opacity: 1; }
+.vcl-menu-anchor { position: fixed; width: 28px; height: 28px; opacity: 0; pointer-events: none; z-index: 70; }
 #vcl-navigation .vcl-selected { background: var(--vcl-selected); color: var(--vscode-list-inactiveSelectionForeground, var(--vcl-fg)); }
 #vcl-navigation .vcl-activity { width: 6px; height: 6px; flex: 0 0 6px; border-radius: 50%; background: var(--vscode-testing-runAction, #2c9b55); }
 #vcl-navigation .vcl-attention { width: 8px; height: 8px; flex-basis: 8px; background: #3794ff; }

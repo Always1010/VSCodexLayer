@@ -4,6 +4,15 @@
   const acquire = globalThis.acquireVsCodeApi;
   const subscribers = new Set();
   const reasoningSubscribers = new Set();
+  const menuSubscribers = new Set();
+  const menuSurfaces = new Set();
+  const archiveSubscribers = new Set();
+  const menuErrorSubscribers = new Set();
+  let menuTarget = null;
+  let menuSequence = 0;
+  const notifyMenu = () => {
+    for (const callback of menuSubscribers) { try { callback(); } catch { /* Isolate native render subscribers. */ } }
+  };
   let reasoningEnabled = false;
   let nativeApi;
   let nativeReady = false;
@@ -33,6 +42,50 @@
     });
   };
   globalThis.__vscodexLayerBridge = Object.freeze({
+    subscribeThreadMenu(callback) { menuSubscribers.add(callback); return () => menuSubscribers.delete(callback); },
+    threadMenuTarget() { return menuTarget; },
+    registerThreadMenuSurface(surface) {
+      menuSurfaces.add(surface);
+      return () => {
+        menuSurfaces.delete(surface);
+        if (menuTarget?.surface === surface) { menuTarget = null; notifyMenu(); }
+      };
+    },
+    openThreadMenu(thread, container) {
+      const surface = menuSurfaces.values().next().value;
+      if (!surface) throw new Error('官方聊天菜单尚未就绪，请稍后重试。');
+      if (!thread || typeof thread.id !== 'string' || !/^[\w-]{1,200}$/.test(thread.id)
+        || !container?.isConnected) throw new Error('聊天菜单位置无效。');
+      menuTarget = { surface, container, token: ++menuSequence, thread: { id: thread.id, title: String(thread.title ?? ''),
+        cwd: typeof thread.cwd === 'string' ? thread.cwd : null, hostId: 'local' } };
+      notifyMenu();
+    },
+    closeThreadMenu() { if (menuTarget) { menuTarget = null; notifyMenu(); } },
+    subscribeThreadMenuError(callback) { menuErrorSubscribers.add(callback); return () => menuErrorSubscribers.delete(callback); },
+    threadMenuError(error, token) {
+      queueMicrotask(() => {
+        if (token != null && menuTarget?.token !== token) return;
+        for (const callback of menuErrorSubscribers) { try { callback(error); } catch { /* Isolate navigation error reporting. */ } }
+      });
+    },
+    filterThreadMenu(items) {
+      const allowed = new Set(['rename-thread', 'share-thread', 'copy-deeplink', 'copy-conversation-markdown',
+        'copy-working-directory', 'archive-thread']);
+      const filter = (values) => values.flatMap((item) => {
+        if (item.type === 'separator') return [];
+        if (allowed.has(item.id)) return [item];
+        const submenu = item.submenu && filter(item.submenu);
+        return submenu?.length ? [{ ...item, submenu }] : [];
+      });
+      const result = filter(items);
+      const archive = result.findIndex((item) => item.id === 'archive-thread');
+      if (archive > 0) result.splice(archive, 0, { id: 'vcl-archive-separator', type: 'separator' });
+      return result;
+    },
+    subscribeThreadArchived(callback) { archiveSubscribers.add(callback); return () => archiveSubscribers.delete(callback); },
+    threadArchived(threadId) {
+      for (const callback of archiveSubscribers) { try { callback(threadId); } catch { /* Keep native success handling intact. */ } }
+    },
     reasoningEnabled() { return reasoningEnabled; },
     subscribeReasoning(callback) {
       reasoningSubscribers.add(callback);
