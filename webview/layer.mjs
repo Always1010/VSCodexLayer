@@ -51,6 +51,7 @@ class Navigation {
     this.pendingEdits = []; this.inFlightEdits = [];
     this.threads = []; this.closed = new Set(this.state.groups); this.query = ''; this.active = null;
     this.view = 'active'; this.revision = 0; this.membership = new Map();
+    this.pendingThreads = new Map();
     this.archiveView = { threads: [], closed: new Set(), query: '', mode: 'all', revision: 0 };
     this.normalPosition = {}; this.restoring = new Set();
     this.activity = new ThreadActivity(this.state.unread);
@@ -211,9 +212,29 @@ class Navigation {
     if (!target.hasLoaded || target.dirty) this.refresh(view);
   }
   invalidateLists(change) {
+    if (this.disposed) return;
+    if (change?.method === 'thread/started' && change.thread?.id === change.threadId
+      && typeof change.threadId === 'string' && this.membership.get(change.threadId) !== true) {
+      const pending = this.pendingThreads.get(change.threadId) ?? { thread: { ...change.thread }, titleUpdated: false };
+      const thread = pending.thread;
+      this.pendingThreads.set(thread.id, pending);
+      const index = this.threads.findIndex((item) => item.id === thread.id);
+      if (index < 0) this.threads.push(thread); else this.threads[index] = thread;
+      if (this.active === thread.id) this.closed.delete(normalizePath(thread.cwd));
+      this.render();
+    } else if (change?.method === 'thread/name/updated' && typeof change.title === 'string') {
+      const pending = this.pendingThreads.get(change.threadId);
+      if (pending) this.pendingThreads.set(change.threadId, { thread: { ...pending.thread, title: change.title }, titleUpdated: true });
+      for (const view of ['active', 'archived']) {
+        const target = this.cache(view);
+        target.threads = target.threads.map((thread) => thread.id === change.threadId ? { ...thread, title: change.title } : thread);
+      }
+      this.render();
+    }
     if (typeof change?.threadId === 'string' && ['thread/archived', 'thread/unarchived'].includes(change.method)) {
       const archived = change.method === 'thread/archived';
       this.membership.set(change.threadId, archived);
+      if (archived) this.pendingThreads.delete(change.threadId);
       const opposite = this.cache(archived ? 'active' : 'archived');
       opposite.threads = opposite.threads.filter((thread) => thread.id !== change.threadId);
       this.render();
@@ -433,6 +454,7 @@ class Navigation {
     clearTimeout(target.refreshTimer); target.refreshTimer = null;
     target.loading = true; target.error = null;
     const revision = target.revision;
+    const pendingAtStart = new Map(this.pendingThreads);
     if (this.view === view) { this.status.classList.remove('vcl-error'); this.render(); }
     try {
       const threads = await loadAllThreads((cursor) => this.client.request('list', { cursor, archived: view === 'archived' }), {
@@ -448,6 +470,24 @@ class Navigation {
       const knownActive = target.threads.some((thread) => thread.id === this.active);
       target.threads = threads.filter((thread) => !this.membership.has(thread.id)
         || this.membership.get(thread.id) === (view === 'archived'));
+      if (view === 'active' && this.pendingThreads.size) {
+        const merged = new Map(target.threads.map((thread) => [thread.id, thread]));
+        for (const [id, update] of this.pendingThreads) {
+          const pending = update.thread;
+          const listed = merged.get(id);
+          // Only a read begun after the latest event can confirm the indexed record.
+          if (listed && pendingAtStart.get(id) === update
+            && (!update.titleUpdated || listed.title === pending.title)) {
+            this.pendingThreads.delete(id);
+          } else {
+            merged.set(id, { ...listed, ...pending,
+              createdAt: Number.isFinite(pending.createdAt) && pending.createdAt > 0 ? pending.createdAt : listed?.createdAt ?? pending.createdAt,
+              cwd: pending.cwd ?? listed?.cwd ?? null,
+              title: pending.title === '未命名聊天' && listed ? listed.title : pending.title });
+          }
+        }
+        target.threads = [...merged.values()];
+      }
       target.hasLoaded = true; target.dirty = changed;
       const active = target.threads.find((thread) => thread.id === this.active);
       if (view === 'active' && (firstLoad || !knownActive) && active) this.closed.delete(normalizePath(active.cwd));
