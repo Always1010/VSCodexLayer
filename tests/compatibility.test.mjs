@@ -38,6 +38,31 @@ test('发现当前未过期的最高版本而不选择残留目录', async (t) =
   assert.equal(result.candidates.length, 3);
 });
 
+test('空过期标记视为无标记，损坏的安装或过期清单仍拒绝并指出文件', async (t) => {
+  const parent = await fs.mkdtemp(path.join(os.tmpdir(), 'vscodex-empty-obsolete-'));
+  t.after(() => fs.rm(parent, { recursive: true, force: true }));
+  const current = await extension(parent, '26.1.0');
+  await extension(parent, '99.1.0');
+  const installed = JSON.stringify([{ identifier: { id: 'openai.chatgpt' }, version: '26.1.0',
+    relativeLocation: path.basename(current) }]);
+  await fs.writeFile(path.join(parent, 'extensions.json'), installed);
+  for (const empty of ['', ' \r\n\t']) {
+    await fs.writeFile(path.join(parent, '.obsolete'), empty);
+    assert.equal((await findInstalledExtension(parent, { platform: 'win32-x64' })).root, current,
+      '空标记不得绕过安装清单选择残留高版本');
+  }
+  for (const [name, content] of [['.obsolete', '{'], ['extensions.json', '']]) {
+    await fs.writeFile(path.join(parent, name), content);
+    await assert.rejects(findInstalledExtension(parent, { platform: 'win32-x64' }), (error) => {
+      assert.ok(error instanceof SyntaxError);
+      assert.ok(error.message.includes(path.join(parent, name)));
+      return true;
+    });
+    await fs.writeFile(path.join(parent, '.obsolete'), '{}');
+    await fs.writeFile(path.join(parent, 'extensions.json'), installed);
+  }
+});
+
 test('ARM64 发现遵循安装清单、平台和过期标记，多个宿主拒绝猜测', async (t) => {
   const home = await fs.mkdtemp(path.join(os.tmpdir(), 'vscodex-arm64-'));
   t.after(() => fs.rm(home, { recursive: true, force: true }));

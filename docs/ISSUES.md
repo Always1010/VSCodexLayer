@@ -71,3 +71,13 @@
 - 解决方案：宿主从同轮次的回复完成通知或结束事件中提取最终回复编号，不转发正文；官方助手回复组件增加布局透明的线程／回复／完成标记。前端仅在可见且有焦点的当前正文接收真实阅读操作，确认本轮回复的实质正文可见约 300 毫秒后清除并保存结束提示，支持长回复和反向滚动。切换、隐藏、失焦和新轮次重置检测；审批、输入和错误提示继续保留；定位失败不自动清除。
 - 验证：16 项宿主、导航和兼容单元测试通过；阅读回执专项无头检查使用真实浏览器输入事件验证当前与长回复、反向滚动、旧消息、自动滚动、导航区、隐藏与焦点、完成前后时序、新轮次保护、定位失败和审批／输入／错误保留。当前 Linux ARM64 `26.51007.21434` 的接入检查执行实际生成的回复标记组件并核对参数透传，全部补丁语法、临时副本应用、旧补丁更新、重复应用和恢复通过。实际安装插件未修改，真实 VS Code 窗口验收待应用后进行；Windows 严格模式已接入同一实现，当前环境未对目标 Windows 包执行检查。
 - 相关文件：`runtime/host.cjs`、`webview/core.mjs`、`webview/reading.mjs`、`webview/layer.mjs`、`adapters/reasoning.mjs`、`adapters/codex-compatible.mjs`、`adapters/codex-26.5930.51102.mjs`、`tests/host.test.mjs`、`tests/navigation.test.mjs`、`tests/compatibility.test.mjs`、`tools/native-reasoning.mjs`、`tools/check-ui.mjs`、`docs/USAGE.md`。
+
+## ISSUE-008：空过期标记清单导致插件自动发现失败
+
+- 日期：2026-10-11
+- 状态：已解决
+- 现象：远程插件的 `status` 和更新命令直接报 `Unexpected end of JSON input`；显式指定已安装插件路径时，状态与补丁计划正常。
+- 原因：自动发现将可选的 `.obsolete` 文件内容直接作为 JSON 解析，没有处理空文件，也没有在解析异常中指出来源文件。当前过期标记文件为零字节，安装清单和插件备份完整。
+- 解决方案：空白 `.obsolete` 按无过期标记处理，继续严格遵循安装清单；损坏的非空过期标记或安装清单仍拒绝，并报告来源路径。不改写 VS Code 元数据。
+- 验证：6 项兼容与发现测试通过，覆盖空文件和空白标记、安装清单过滤残留高版本、损坏元数据拒绝及路径提示。保留实际零字节 `.obsolete` 不变，自动发现成功定位远程 `26.51007.21434-linux-arm64`，读取到完整的 13 文件旧补丁状态。
+- 相关文件：`lib/extension-discovery.mjs`、`tests/compatibility.test.mjs`、`docs/USAGE.md`。
