@@ -45,14 +45,34 @@ body.vcl-enabled > #root {
 #vcl-navigation .vcl-icon-button:hover, #vcl-launcher:hover { background: var(--vcl-hover, var(--vscode-list-hoverBackground, #ededed)); }
 #vcl-navigation .vcl-icon-button:disabled { opacity: .5; cursor: default; }
 #vcl-navigation .vcl-controls { padding: 0 10px 8px; display: grid; gap: 8px; }
+#vcl-navigation .vcl-scope-row { display: flex; align-items: center; gap: 4px; min-width: 0; }
+#vcl-navigation .vcl-scope-row .vcl-select { flex: 1; min-width: 0; }
+#vcl-navigation #vcl-add-project { flex: 0 0 28px; }
+#vcl-navigation .vcl-project-form { display: grid; gap: 6px; padding: 10px; border: 1px solid var(--vcl-border); border-radius: 6px; }
+#vcl-navigation .vcl-project-form[hidden] { display: none; }
+#vcl-navigation .vcl-path-row { display: flex; align-items: center; gap: 4px; padding-left: 6px; border: 1px solid var(--vcl-border); border-radius: 4px; background: var(--vscode-input-background, #fff); }
+#vcl-navigation .vcl-form-help, #vcl-navigation .vcl-form-error { font-size: 11px; overflow-wrap: anywhere; }
+#vcl-navigation .vcl-form-help { color: var(--vcl-muted); }
+#vcl-navigation .vcl-form-error { color: var(--vscode-errorForeground, #c42b1c); }
+#vcl-navigation .vcl-form-error:empty { display: none; }
+#vcl-navigation .vcl-form-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+#vcl-navigation .vcl-action { padding: 5px 8px; border: 1px solid var(--vcl-border); border-radius: 4px; background: var(--vscode-button-secondaryBackground, var(--vcl-hover)); }
+#vcl-navigation .vcl-primary { width: 100%; background: var(--vscode-button-background, #007acc); color: var(--vscode-button-foreground, #fff); border-color: transparent; }
+#vcl-navigation .vcl-action:disabled { opacity: .5; cursor: default; }
+#vcl-navigation .vcl-project-menu { position: fixed; width: 210px; max-width: calc(100vw - 8px); z-index: 100; padding: 4px; border: 1px solid var(--vcl-border); border-radius: 6px; background: var(--vscode-menu-background, var(--vscode-sideBar-background, #f8f8f8)); box-shadow: 0 2px 8px #0003; }
+#vcl-navigation .vcl-project-menu button { display: block; width: 100%; min-height: 30px; padding: 5px 8px; border: 0; border-radius: 3px; text-align: left; background: transparent; }
+#vcl-navigation .vcl-project-menu button:hover, #vcl-navigation .vcl-project-menu button:focus { background: var(--vcl-hover); }
+#vcl-navigation .vcl-located { animation: vcl-locate 1.8s ease-out; }
+@keyframes vcl-locate { from { box-shadow: inset 0 0 0 1px var(--vscode-focusBorder, #007acc); } to { box-shadow: inset 0 0 0 1px transparent; } }
+@media (prefers-reduced-motion: reduce) { #vcl-navigation .vcl-located { animation: none; outline: 1px solid var(--vscode-focusBorder, #007acc); } }
 #vcl-navigation .vcl-select, #vcl-navigation .vcl-search {
   width: 100%; min-height: 32px; border: 1px solid var(--vcl-border); border-radius: 6px;
   background: var(--vscode-input-background, #fff);
 }
 #vcl-navigation .vcl-select { padding: 4px 8px; color: var(--vscode-input-foreground, var(--vcl-fg)); }
 #vcl-navigation .vcl-search { display: flex; gap: 6px; align-items: center; padding: 0 8px; color: var(--vcl-muted); }
-#vcl-navigation .vcl-input { min-width: 0; width: 100%; padding: 6px 0; border: 0; background: transparent; color: var(--vscode-input-foreground, var(--vcl-fg)); }
-#vcl-navigation .vcl-input::placeholder { color: var(--vscode-input-placeholderForeground, #888); }
+#vcl-navigation .vcl-input, #vcl-navigation .vcl-path-input { min-width: 0; width: 100%; padding: 6px 0; border: 0; background: transparent; color: var(--vscode-input-foreground, var(--vcl-fg)); }
+#vcl-navigation .vcl-input::placeholder, #vcl-navigation .vcl-path-input::placeholder { color: var(--vscode-input-placeholderForeground, #888); }
 #vcl-navigation .vcl-status { color: var(--vcl-muted); font-size: 11px; padding: 2px 12px 6px; overflow-wrap: anywhere; }
 #vcl-navigation .vcl-status:empty { display: none; }
 #vcl-navigation .vcl-error { color: var(--vscode-errorForeground, #c42b1c); }
@@ -68,6 +88,9 @@ body.vcl-enabled > #root {
 #vcl-navigation .vcl-project-pin.vcl-pinned { color: var(--vscode-textLink-foreground, #007acc); }
 #vcl-navigation .vcl-project-context { font-size: 11px; color: var(--vcl-muted); overflow-wrap: anywhere; }
 #vcl-navigation .vcl-project-context:empty { display: none; }
+#vcl-navigation .vcl-project-notice { font-size: 11px; color: var(--vcl-muted); overflow-wrap: anywhere; }
+#vcl-navigation .vcl-project-notice.vcl-error { color: var(--vscode-errorForeground, #c42b1c); }
+#vcl-navigation .vcl-project-notice:empty { display: none; }
 #vcl-navigation .vcl-project-heading, #vcl-navigation .vcl-thread {
   width: 100%; display: flex; align-items: center; text-align: left; gap: 6px;
   min-height: 32px; border: 0; border-radius: 6px; background: transparent; padding: 6px;
