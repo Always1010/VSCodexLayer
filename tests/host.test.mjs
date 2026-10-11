@@ -35,6 +35,56 @@ function fixture(platform = process.platform) {
 }
 const flush = () => new Promise((resolve) => setImmediate(resolve));
 
+test('独立摘要使用内存 Markdown 阅读视图，实时更新隔离且不请求模型', async (t) => {
+  const f = fixture(); t.after(() => f.host.dispose());
+  let documentProvider;
+  let registrations = 0;
+  let disposed = 0;
+  const changes = [];
+  const commands = [];
+  f.vscode.EventEmitter = class {
+    event = () => ({ dispose() {} });
+    fire(uri) { changes.push(uri); }
+    dispose() { disposed += 1; }
+  };
+  f.vscode.Uri = { from: (parts) => parts };
+  f.vscode.workspace.registerTextDocumentContentProvider = (scheme, value) => {
+    assert.match(scheme, /^vscodex-reasoning-/);
+    documentProvider = value; registrations += 1;
+    return { dispose() { disposed += 1; } };
+  };
+  f.vscode.workspace.openTextDocument = async (uri) => ({ uri });
+  f.vscode.commands = { async executeCommand(...args) { commands.push(args); } };
+  const detail = { hostId: 'local', conversationId: 'thread', itemId: 'thought', content: '**标题**\n\n第一段', completed: false };
+  assert.equal((await f.request('update-reasoning-view', detail)).result.updated, false);
+  assert.equal(registrations, 0, '不打开阅读视图时不注册文档或保存正文');
+  assert.equal((await f.request('open-reasoning-view', detail)).result.opened, true);
+  assert.equal(commands[0][0], 'markdown.showPreview');
+  const uri = commands[0][1];
+  assert.equal(uri.path, '/思考摘要.md');
+  assert.equal(registrations, 1);
+  assert.ok(documentProvider.provideTextDocumentContent(uri).includes('生成中'));
+  assert.ok(documentProvider.provideTextDocumentContent(uri).endsWith(detail.content));
+  const count = changes.length;
+  for (const changed of [{ hostId: 'remote' }, { conversationId: 'other' }, { itemId: 'other' }]) {
+    assert.equal((await f.request('update-reasoning-view', { ...detail, ...changed, content: '其他正文' })).result.updated, false);
+  }
+  await f.request('update-reasoning-view', detail);
+  assert.equal(changes.length, count, '重复内容和其他摘要不刷新当前阅读视图');
+  const finished = { ...detail, content: detail.content + '\n第二段', completed: true };
+  await f.request('update-reasoning-view', finished);
+  assert.equal(changes.length, count + 1);
+  assert.ok(documentProvider.provideTextDocumentContent(uri).includes('已完成'));
+  assert.ok(documentProvider.provideTextDocumentContent(uri).endsWith(finished.content));
+  await f.request('open-reasoning-view', { ...detail, itemId: 'next' });
+  assert.equal(registrations, 1, '同一聊天面板复用内存阅读文档');
+  assert.match((await f.request('open-reasoning-view', { ...detail, content: null })).error, /正文无效/);
+  assert.equal(f.requests.length, 0, '摘要阅读不调用后端或产生新聊天');
+  f.host.dispose();
+  assert.equal(disposed, 2);
+  assert.ok(!documentProvider.provideTextDocumentContent(uri).includes('第一段'), '面板销毁后释放正文');
+});
+
 test('审批和输入状态保留，结束事件只转发导航所需字段', async (t) => {
   const f = fixture(); t.after(() => f.host.dispose());
   const pending = f.request('list'); await flush();

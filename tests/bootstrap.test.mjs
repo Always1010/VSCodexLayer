@@ -37,6 +37,27 @@ test('官方仅获取一次 API，草稿状态原样透传，路由观察错误�
   unsubscribeReasoning();
   bridge.setReasoningEnabled(true);
   assert.equal(reasoningChanges, 2);
+  const readerCalls = [];
+  let finishOpening;
+  const removeReader = bridge.setReasoningReader((method, detail) => {
+    readerCalls.push({ method, detail });
+    if (method === 'open-reasoning-view') return new Promise((resolve) => { finishOpening = resolve; });
+  });
+  const props = { hostId: 'local', conversationId: 'thread', item: { sourceItemId: 'summary', content: '第一段', completed: false } };
+  bridge.updateReasoningView(props);
+  assert.equal(readerCalls.length, 0, '未点击阅读入口时不转发摘要正文');
+  bridge.openReasoningView(props);
+  bridge.updateReasoningView({ ...props, item: { ...props.item, content: '第一段\n第二段' } });
+  bridge.updateReasoningView({ ...props, hostId: 'another-host' });
+  assert.equal(readerCalls.length, 1, '等待阅读视图打开且排除其他宿主');
+  finishOpening();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(readerCalls.length, 2);
+  assert.equal(readerCalls[1].detail.content, '第一段\n第二段');
+  removeReader();
+  bridge.updateReasoningView(props);
+  bridge.openReasoningView(props);
+  assert.equal(readerCalls.length, 2, '销毁阅读入口后停止转发');
   const snapshots = [];
   bridge.subscribe((value) => snapshots.push(value));
   bridge.subscribe(() => { throw new Error('addon error'); });

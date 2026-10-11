@@ -7,7 +7,8 @@ import { fileURLToPath } from 'node:url';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const readingOnly = process.argv.length === 3 && process.argv[2] === '--reading';
-if (process.argv.length > 2 && !readingOnly) throw new Error('用法：node tools/check-ui.mjs [--reading]');
+const reasoningOnly = process.argv.length === 3 && process.argv[2] === '--reasoning';
+if (process.argv.length > 2 && !readingOnly && !reasoningOnly) throw new Error('用法：node tools/check-ui.mjs [--reading|--reasoning]');
 const output = path.join(root, '.scratch', 'ui');
 await fs.mkdir(output, { recursive: true });
 const executable = [
@@ -125,7 +126,27 @@ try {
   await send('Emulation.setDeviceMetricsOverride', { width: 1100, height: 800, deviceScaleFactor: 1, mobile: false }, sessionId);
   await send('Page.navigate', { url: address }, sessionId);
   await waitFor(`document.querySelector('.vcl-count')?.textContent.includes('63 个聊天')`);
-  if (readingOnly) {
+  if (reasoningOnly) {
+    // Native disclosure and streaming transitions run in native-reasoning.mjs.
+    // Here exercise the actual stylesheet in a narrow viewport with unbroken text.
+    await send('Emulation.setDeviceMetricsOverride', { width: 580, height: 800, deviceScaleFactor: 1, mobile: false }, sessionId);
+    await evaluate(`const area=document.querySelector('article');area.style.padding='0';
+      const summary=document.createElement('section');summary.dataset.vclReasoningSummary='true';
+      const body=document.createElement('div');body.dataset.vclReasoningBody='true';
+      const prose=document.createElement('p');prose.textContent='长路径/'+('abcdef0123456789'.repeat(180));
+      const pre=document.createElement('pre');pre.style.whiteSpace='pre';
+      const code=document.createElement('code');code.textContent='工具输出\\n'+('longtoken'.repeat(120));pre.append(code);
+      body.append(prose,pre);const native=document.createElement('div');native.append(body);
+      const reader=document.createElement('button');reader.className='vcl-reasoning-reader';reader.title='在主编辑区阅读实时摘要';reader.setAttribute('aria-label',reader.title);reader.textContent='↗';
+      summary.append(native,reader);area.replaceChildren(summary);window.summaryBody=body;window.summaryBox=summary`);
+    await assertBrowser('summaryBody.getBoundingClientRect().height>140', '摘要仍被限制在小窗口内');
+    await assertBrowser('summaryBody.scrollWidth<=summaryBody.clientWidth+1', '长文本或代码撑出正文宽度');
+    await assertBrowser(`getComputedStyle(summaryBody.querySelector('pre')).whiteSpace==='pre-wrap'`, '代码没有保留换行并折行');
+    await assertBrowser(`getComputedStyle(summaryBody.querySelector('p')).whiteSpace==='pre-wrap'`, '正文换行没有保留');
+    await assertBrowser(`getComputedStyle(summaryBody).overflowY==='visible'`, '摘要出现嵌套的纵向滚动容器');
+    await assertBrowser('summaryBox.scrollWidth<=summaryBox.clientWidth+1', '阅读按钮或长内容撑出窄侧栏');
+    console.log('摘要专项无头检查通过：窄侧栏、长路径、无空格长文本、代码折行、自然高度和单层纵向滚动。');
+  } else if (readingOnly) {
     await send('Page.bringToFront', {}, sessionId);
     await evaluate(`document.querySelector('[data-vcl-key="thread:thread-0"]').click();
       const area=document.querySelector('article');area.className='thread-scroll-container';area.tabIndex=0;

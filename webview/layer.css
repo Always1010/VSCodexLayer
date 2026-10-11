@@ -95,3 +95,52 @@ body.vcl-enabled > #root {
   #vcl-navigation .vcl-loading .vcl-icon { animation: vcl-spin 1.4s linear infinite; }
 }
 @keyframes vcl-spin { to { transform: rotate(360deg); } }
+[data-vcl-reasoning-summary] {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 4px;
+  min-width: 0;
+  max-width: 100%;
+}
+[data-vcl-reasoning-summary] > :first-child { min-width: 0; }
+[data-vcl-reasoning-body] {
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  word-break: normal;
+  color: var(--vscode-editor-foreground, inherit);
+}
+[data-vcl-reasoning-body] :is(p, li, a, code, h1, h2, h3) {
+  overflow-wrap: anywhere;
+  word-break: normal;
+}
+[data-vcl-reasoning-body] :is(p, li) { white-space: pre-wrap; }
+[data-vcl-reasoning-body] pre,
+[data-vcl-reasoning-body] pre code {
+  white-space: pre-wrap !important;
+  overflow-wrap: anywhere;
+  word-break: normal;
+}
+[data-vcl-reasoning-summary] .vcl-reasoning-reader {
+  align-self: start;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 4px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--vscode-descriptionForeground, #777);
+  cursor: pointer;
+}
+[data-vcl-reasoning-summary] .vcl-reasoning-reader svg { width: 16px; height: 16px; }
+[data-vcl-reasoning-summary] .vcl-reasoning-reader:hover {
+  color: var(--vscode-editor-foreground, inherit);
+  background: var(--vscode-list-hoverBackground, #ededed);
+}
+[data-vcl-reasoning-summary] .vcl-reasoning-reader:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder, #007acc);
+  outline-offset: -1px;
+}
