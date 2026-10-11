@@ -40,9 +40,16 @@ function compareThreads(a, b) {
     || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
 }
 
-export function groupThreads(threads, folders = [], { mode = 'all', query = '', pinnedProjects = [] } = {}) {
+export function groupThreads(threads, folders = [], { mode = 'all', query = '', pinnedProjects = [], registeredProjects = [] } = {}) {
   const groups = new Map();
   const pins = new Map();
+  const registered = new Set();
+  for (const project of registeredProjects) {
+    const key = normalizePath(project?.path);
+    if (!key || registered.has(key)) continue;
+    registered.add(key);
+    groups.set(key, { key, name: projectName(project.path), path: project.path, current: false, threads: [] });
+  }
   for (const project of pinnedProjects) {
     const key = normalizePath(project?.path);
     if (!key || pins.has(key)) continue;
@@ -70,7 +77,7 @@ export function groupThreads(threads, folders = [], { mode = 'all', query = '', 
     .map((group) => {
       const projectMatches = !term || `${group.name} ${group.path ?? ''}`.toLocaleLowerCase().includes(term);
       const visible = projectMatches ? group.threads : group.threads.filter((thread) => thread.title.toLocaleLowerCase().includes(term));
-      return { ...group, pinned: pins.has(group.key), total: group.threads.length, threads: [...visible].sort(compareThreads) };
+      return { ...group, registered: registered.has(group.key), pinned: pins.has(group.key), total: group.threads.length, threads: [...visible].sort(compareThreads) };
     })
     .filter((group) => !term || `${group.name} ${group.path ?? ''}`.toLocaleLowerCase().includes(term) || group.threads.length)
     .sort((a, b) => Number(b.pinned) - Number(a.pinned)

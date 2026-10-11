@@ -114,6 +114,21 @@ test('项目置顶顺序稳定，空项目保留并遵循当前筛选和搜索',
     { path: 'd:\\Project\\', name: 'Duplicate' }] }).length, 1, 'Windows 同目录不得重复置顶');
 });
 
+test('手动项目合并历史、工作区和置顶，移除登记只影响无其他来源的空项目', () => {
+  const threads = [{ id: 'a', title: '历史', cwd: '/a/Project', createdAt: 1 }];
+  const folders = [{ name: 'Current', path: '/current' }];
+  const registeredProjects = [{ path: '/a/Project' }, { path: '/b/Project' }, { path: '/empty' }, { path: '/current' }, { path: '/empty/' }];
+  const pinnedProjects = [{ path: '/empty', name: 'Empty' }];
+  const groups = groupThreads(threads, folders, { registeredProjects, pinnedProjects });
+  assert.equal(groups.length, 4); assert.ok(groups.every((group) => group.registered));
+  assert.equal(groups.find((group) => group.path === '/a/Project').total, 1);
+  assert.equal(groups.find((group) => group.path === '/b/Project').total, 0);
+  assert.deepEqual(groupThreads(threads, folders, { registeredProjects, mode: 'current' }).map((group) => group.path), ['/current']);
+  assert.deepEqual(groupThreads(threads, folders, { registeredProjects, query: '/b/Project' }).map((group) => group.path), ['/b/Project']);
+  assert.deepEqual(groupThreads(threads, folders, { pinnedProjects }).map((group) => group.path), ['/empty', '/current', '/a/Project']);
+  assert.ok(groupThreads(threads, folders, { pinnedProjects }).every((group) => !group.registered));
+});
+
 test('聊天按创建时间固定，活动、标题、分页顺序和搜索不改变位置', () => {
   const threads = [
     { id: 'c', title: '聊天 C', cwd: '/b/Project', createdAt: 30, updatedAt: 30 },

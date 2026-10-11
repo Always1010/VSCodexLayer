@@ -6,7 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 const { createLayerHost } = createRequire(import.meta.url)('../runtime/host.cjs');
 
-function fixture(platform = process.platform) {
+function fixture(platform = process.platform, globalState) {
   const messages = [];
   const requests = [];
   let callbacks;
@@ -21,9 +21,9 @@ function fixture(platform = process.platform) {
   const target = { postMessage(message) { messages.push(message); responses.get(message.id)?.(message); responses.delete(message.id); } };
   const extensionUri = { scheme: 'file', fsPath: path.resolve('official-extension') };
   const extension = { extensionKind: 2, extensionUri };
-  let state = { mode: 'current', width: 280 };
+  const states = new Map([['vscodexLayer.navigationState.v1', { mode: 'current', width: 280 }]]);
   const provider = { codexMcpConnection: connection, extensionVersion: 'test', extensionUri,
-    globalState: { async get() { return state; }, async update(_key, value) { state = value; } },
+    globalState: globalState ?? { async get(key) { return states.get(key); }, async update(key, value) { states.set(key, value); } },
     postMessageToWebview(view, message) { assert.equal(view, target); messages.push(message); } };
   const vscode = { env: {}, ExtensionKind: { UI: 1, Workspace: 2 }, extensions: { getExtension: () => extension },
     workspace: { workspaceFolders: [{ name: 'Project', uri: { scheme: 'file', fsPath: 'D:\\Project' } }],
@@ -34,6 +34,65 @@ function fixture(platform = process.platform) {
   return { host, vscode, extension, messages, requests, send, request, callbacks: () => callbacks, notify: (message) => notify(message) };
 }
 const flush = () => new Promise((resolve) => setImmediate(resolve));
+
+test('手动项目独立持久化，多个面板并发不丢记录，失败可恢复且失效目录可移除', async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'vcl-projects-'));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const directories = ['Project', 'project', 'project '].map((name) => path.join(root, name));
+  await Promise.all(directories.map((directory) => fs.mkdir(directory)));
+  const states = new Map(); let failWrite = false;
+  const store = { async get(key) { return states.get(key); }, async update(key, value) {
+    if (failWrite) throw new Error('保存失败');
+    await flush(); states.set(key, value);
+  } };
+  const first = fixture(process.platform, store), second = fixture(process.platform, store);
+  t.after(() => { first.host.dispose(); second.host.dispose(); });
+  assert.deepEqual((await first.request('init')).result.registry, { revision: 0, projects: [] });
+  const [a, b] = await Promise.all([first.request('add-project', { cwd: directories[0] }), second.request('add-project', { cwd: directories[1] })]);
+  assert.ok(a.result.changed && b.result.changed);
+  const registry = (await first.request('init')).result.registry;
+  assert.equal(registry.revision, 2);
+  assert.deepEqual(registry.projects.map((project) => project.path).sort(), directories.slice(0, 2).sort());
+  assert.equal(second.messages.filter((message) => message.event?.type === 'projects-changed').length, 2);
+  const duplicate = await first.request('add-project', { cwd: `${directories[0]}${path.sep}.` });
+  assert.equal(duplicate.result.changed, false); assert.equal(duplicate.result.revision, 2);
+  await second.request('save-state', { state: { mode: 'current', width: 310 } });
+  assert.deepEqual((await first.request('init')).result.registry, registry, '导航偏好保存不得覆盖项目登记');
+  failWrite = true;
+  assert.match((await first.request('add-project', { cwd: directories[2] })).error, /保存失败/);
+  assert.deepEqual((await first.request('init')).result.registry, registry);
+  failWrite = false;
+  assert.equal((await second.request('add-project', { cwd: directories[2] })).result.changed, true);
+  const copied = [];
+  first.vscode.env.clipboard = { async writeText(value) { copied.push(value); } };
+  await first.request('copy-project-path', { cwd: directories[2] });
+  assert.deepEqual(copied, [directories[2]], '路径中的尾部空格不得丢失');
+  await fs.rm(directories[0], { recursive: true });
+  assert.match((await first.request('add-project', { cwd: directories[0] })).error, /不存在或无法访问/);
+  assert.equal((await first.request('remove-project', { cwd: directories[0] })).result.changed, true);
+  const reopened = fixture(process.platform, store); t.after(() => reopened.host.dispose());
+  assert.deepEqual((await reopened.request('init')).result.registry.projects.map((project) => project.path).sort(), directories.slice(1).sort());
+  assert.equal(first.requests.length, 0, '添加和移除不调用聊天后端');
+});
+
+test('目录选择取消不产生变更，拒绝客户端或虚拟目录并校验选中目录', async (t) => {
+  const f = fixture(); t.after(() => f.host.dispose());
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'vcl-picker-'));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  let selected;
+  f.vscode.window = { async showOpenDialog(options) {
+    assert.equal(options.canSelectFiles, false); assert.equal(options.canSelectFolders, true); assert.equal(options.canSelectMany, false);
+    return selected;
+  } };
+  assert.equal((await f.request('pick-project-folder')).result.cancelled, true);
+  selected = [{ scheme: 'vscode-local', fsPath: root }];
+  assert.match((await f.request('pick-project-folder')).error, /当前运行主机/);
+  selected = [{ scheme: 'file', fsPath: root }];
+  assert.equal((await f.request('pick-project-folder')).result.cwd, root);
+  assert.deepEqual((await f.request('init')).result.registry.projects, [], '选择目录本身不登记项目');
+  await fs.rm(root, { recursive: true });
+  assert.match((await f.request('pick-project-folder')).error, /不存在或无法访问/);
+});
 
 test('项目置顶偏好保存并过滤无效目录，旧偏好正常读取', async (t) => {
   const f = fixture(); t.after(() => f.host.dispose());
