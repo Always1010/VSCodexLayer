@@ -93,6 +93,42 @@ export function routeThreadId(route) {
   return match?.[1] ?? null;
 }
 
+export function navigationEdits(before, after) {
+  const edits = [];
+  for (const key of ['mode', 'width', 'collapsed', 'disabled']) {
+    if (before[key] !== after[key]) edits.push({ type: 'set', key, value: after[key] });
+  }
+  const oldPins = new Map((before.pinnedProjects ?? []).map((project) => [normalizePath(project.path), project]));
+  const newPins = new Map((after.pinnedProjects ?? []).map((project) => [normalizePath(project.path), project]));
+  for (const [key, project] of oldPins) if (!newPins.has(key)) edits.push({ type: 'pin', project, enabled: false });
+  for (const [key, project] of newPins) if (!oldPins.has(key)) edits.push({ type: 'pin', project, enabled: true });
+  const oldGroups = new Set(before.groups), newGroups = new Set(after.groups);
+  for (const key of oldGroups) if (!newGroups.has(key)) edits.push({ type: 'group', key, closed: false });
+  for (const key of newGroups) if (!oldGroups.has(key)) edits.push({ type: 'group', key, closed: true });
+  return edits;
+}
+
+export function overlayNavigationEdits(state, edits) {
+  const next = { ...state, pinnedProjects: [...(state.pinnedProjects ?? [])], groups: [...(state.groups ?? [])], unread: [...(state.unread ?? [])] };
+  for (const edit of edits) {
+    if (edit.type === 'set') next[edit.key] = edit.value;
+    if (edit.type === 'pin') {
+      const key = normalizePath(edit.project.path);
+      if (!edit.enabled) next.pinnedProjects = next.pinnedProjects.filter((project) => normalizePath(project.path) !== key);
+      else if (!next.pinnedProjects.some((project) => normalizePath(project.path) === key)) next.pinnedProjects.push(edit.project);
+    }
+    if (edit.type === 'group') {
+      const groups = new Set(next.groups);
+      if (edit.closed) groups.add(edit.key); else groups.delete(edit.key);
+      next.groups = [...groups];
+    }
+    if (edit.type === 'acknowledge' && (next.unreadTurns?.[edit.threadId] ?? null) === (edit.turnToken ?? null)) {
+      next.unread = next.unread.filter((id) => id !== edit.threadId);
+    }
+  }
+  return next;
+}
+
 export class ThreadActivity {
   constructor(unread = []) {
     this.unread = new Set(unread);
@@ -106,8 +142,11 @@ export class ThreadActivity {
       this.unread.delete(event.threadId); this.completedReplies.delete(event.threadId);
     }
     if (event.phase === 'completed') {
-      this.unread.add(event.threadId);
-      this.completedReplies.set(event.threadId, { itemId: event.replyItemId });
+      if (event.unread === false) this.acknowledge(event.threadId);
+      else {
+        this.unread.add(event.threadId);
+        this.completedReplies.set(event.threadId, { itemId: event.replyItemId, turnToken: event.turnToken });
+      }
     }
     return true;
   }

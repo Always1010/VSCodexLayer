@@ -33,7 +33,7 @@ const page = `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8">
 *{box-sizing:border-box}html,body,#root{margin:0;height:100%;width:100%}body{font-family:"Segoe UI","Microsoft YaHei",sans-serif;background:#fff;color:#282828}#root{display:flex;flex-direction:column;padding:24px;background:inherit}header{font-size:14px}article{flex:1;padding:40px 5%;line-height:1.8}article h1{font-size:22px}article p{max-width:600px;color:#777}textarea{width:100%;height:100px;padding:18px;border:1px solid #ddd;border-radius:20px;font:inherit;resize:none;background:inherit;color:inherit}.note{font-size:11px;color:#888;margin-top:8px}
 </style>
 <script>
-window.mockThreads=${JSON.stringify(threads)};window.mockState={mode:'all',width:250,groups:[],collapsed:null,disabled:false};window.mockRegistry={revision:0,projects:[]};window.mockPickedFolder=null;window.mockCannotOpen=false;window.mockSaveFailure=false;window.mockCopiedPath=null;window.mockRequests=[];window.mockRoute='/';window.mockDrafts={'/':'未发送的草稿','/local/thread-8':'历史聊天自己的草稿'};window.mockSubmissions=0;window.mockUnavailable=new Set();let acquired=false;
+window.mockThreads=${JSON.stringify(threads)};window.mockState={revision:0,mode:'all',width:250,groups:[],collapsed:null,disabled:false,pinnedProjects:[],unread:[],unreadTurns:{}};window.mockRegistry={revision:0,projects:[]};window.mockPickedFolder=null;window.mockCannotOpen=false;window.mockSaveFailure=false;window.mockCopiedPath=null;window.mockRequests=[];window.mockRoute='/';window.mockDrafts={'/':'未发送的草稿','/local/thread-8':'历史聊天自己的草稿'};window.mockSubmissions=0;window.mockUnavailable=new Set();let acquired=false;
 window.mockDraftKey=path=>{const url=new URL(path,location.origin);return __vscodexLayerBridge.projectRoute(url.pathname,url.pathname,url.search)?.vclDraftKey??path};
 window.mockNavigate=path=>{mockRoute=path;__vscodexLayerBridge.observeRoute(path);document.querySelector('#native-title').textContent=path==='/'?'':mockThreads.find(t=>'/local/'+t.id===path)?.title??'新聊天';const previous=document.querySelector('#native-composer');const next=previous.cloneNode();next.value=mockDrafts[mockDraftKey(path)]??'';next.oninput=()=>{mockDrafts[mockDraftKey(mockRoute)]=next.value};previous.replaceWith(next);document.querySelector('[data-vcl-home-history]').hidden=path!=='/'};
 window.mockNewChat=()=>{if(!__vscodexLayerBridge.resumeDraft({selectChat:true}))mockNavigate('/')};
@@ -42,7 +42,7 @@ window.acquireVsCodeApi=()=>{if(acquired)throw Error('API acquired twice');acqui
 if(message.type!=='vscodex-layer/request')return;mockRequests.push(message);let result,error;
 if(message.method==='init')result={supported:true,mode:'local',registry:structuredClone(mockRegistry),folders:[{name:'VSCodexLayer',path:'D:/WRK/VSCodexLayer'}],state:mockState,version:'mock'};
 else if(message.method==='list'){const first=message.params.cursor==null;const list=message.params.archived?mockArchivedThreads:mockThreads;result={data:structuredClone(list.slice(first?0:50,first?50:undefined)),nextCursor:first&&list.length>50?'page-2':null};if(message.params.archived&&mockArchiveListFailure)error='归档列表读取失败'}
-else if(message.method==='save-state'){mockState=structuredClone(message.params.state);result={saved:true}}
+else if(message.method==='save-state'){mockState=mockApplyOperations(mockState,message.params.operations);mockState.revision++;result={saved:true,state:structuredClone(mockState)};window.postMessage({type:'vscodex-layer/event',event:{type:'navigation-state-changed',state:structuredClone(mockState)}},location.origin)}
 else if(message.method==='navigate'){mockNavigate('/local/'+message.params.threadId);result={threadId:message.params.threadId}}
 else if(message.method==='validate-project'){if(mockUnavailable.has(message.params.cwd))error='项目目录不存在或无法访问';else result={cwd:message.params.cwd}}
 else if(message.method==='new-project-chat'){if(mockCannotOpen||mockUnavailable.has(message.params.cwd))error='项目目录不存在或无法访问';else{const path=message.params.path+'?vclProjectCwd='+encodeURIComponent(message.params.cwd);mockNavigate(path);result={path,cwd:message.params.cwd}}}
@@ -63,6 +63,18 @@ if(message.method==='list'&&mockHoldView===(message.params.archived?'archived':'
 <script type="module" src="/webview/layer.mjs"></script>
 </head><body><main id="root"><header><button data-vcl-chat-back aria-label="返回">←</button><span id="native-title"></span></header><div data-vcl-home-history>聊天 · 最近聊天 · 查看全部</div><article><h1>右侧保留官方聊天界面</h1><p>这里使用模拟聊天区域检查导航布局。实际增强复用官方消息、输入框、模型选择、工具执行和审批。</p><p>选择左侧聊天，在同一个页面切换。项目可以折叠，支持全部项目和当前项目筛选。</p></article><textarea id="native-composer" aria-label="聊天输入框">未发送的草稿</textarea><div class="note">界面验证示意 · 模拟数据</div></main>
 <script type="module">
+import {overlayNavigationEdits} from '/webview/core.mjs';
+window.mockApplyOperations=overlayNavigationEdits;
+let mockTurnSequence=0;
+window.addEventListener('message',message=>{
+ const event=message.data?.event;if(event?.type!=='thread-activity'||!['started','completed'].includes(event.phase))return;
+ event.turnToken=event.turnToken??(event.phase==='started'?'mock-turn-'+(++mockTurnSequence):mockState.unreadTurns[event.threadId]??'mock-turn-'+(++mockTurnSequence));
+ mockState.unreadTurns[event.threadId]=event.turnToken;
+ mockState.unread=mockState.unread.filter(id=>id!==event.threadId);
+ if(event.phase==='completed')mockState.unread.push(event.threadId);
+ event.unread=event.phase==='completed';mockState.revision++;
+ window.postMessage({type:'vscodex-layer/event',event:{type:'navigation-state-changed',state:structuredClone(mockState)}},location.origin);
+});
 window.nativeRoot=document.getElementById('root');window.nativeApi=acquireVsCodeApi();mockNavigate('/');nativeApi.postMessage({type:'ready'});
 window.mockActionCalls=[];window.mockArchiveFailure=false;
 window.mockArchivedThreads=Array.from({length:61},(_,index)=>({id:'archived-'+index,title:'归档聊天 '+index,

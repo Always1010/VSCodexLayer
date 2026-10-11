@@ -1,5 +1,5 @@
 import { LayerClient } from './client.mjs';
-import { groupThreads, normalizePath, projectName, routeThreadId, loadAllThreads, ThreadActivity } from './core.mjs';
+import { groupThreads, normalizePath, projectName, routeThreadId, loadAllThreads, ThreadActivity, navigationEdits, overlayNavigationEdits } from './core.mjs';
 import { ReplyReader } from './reading.mjs';
 
 const SVG = 'http://www.w3.org/2000/svg';
@@ -47,6 +47,8 @@ function nativeMenuKey(trigger, key) {
 class Navigation {
   constructor(client, bridge, info) {
     this.client = client; this.bridge = bridge; this.info = info; this.state = info.state;
+    this.canonicalState = structuredClone(info.state); this.editBase = structuredClone(info.state);
+    this.pendingEdits = []; this.inFlightEdits = [];
     this.threads = []; this.closed = new Set(this.state.groups); this.query = ''; this.active = null;
     this.view = 'active'; this.revision = 0;
     this.archiveView = { threads: [], closed: new Set(), query: '', mode: 'all', revision: 0 };
@@ -126,7 +128,7 @@ class Navigation {
     this.bridge.setReasoningEnabled(true);
     this.cleanups.push(this.bridge.setReasoningReader((method, detail) =>
       this.client.request(method, detail).catch((error) => { this.showError(error); throw error; })));
-    this.reader = new ReplyReader(this.activity, () => this.active, () => { this.render(); this.persist(); });
+    this.reader = new ReplyReader(this.activity, () => this.active, (threadId, completion) => { this.queueEdits([{ type: 'acknowledge', threadId, turnToken: completion.turnToken ?? null }]); this.render(); });
     this.cleanups.push(() => this.reader.dispose());
     this.cleanups.push(this.bridge.subscribe(({ route }) => this.onRoute(route)));
     this.cleanups.push(this.bridge.setNewChatHandler(() => {
@@ -136,7 +138,7 @@ class Navigation {
     this.cleanups.push(this.bridge.subscribeThreadArchived((threadId) => {
       if (this.disposed) return;
       this.threads = this.threads.filter((thread) => thread.id !== threadId);
-      this.activity.acknowledge(threadId); this.activity.statuses.delete(threadId);
+      this.acknowledge(threadId); this.activity.statuses.delete(threadId);
       if (this.active === threadId) {
         if (this.draftProjectCwd !== null) this.newProjectChat(this.draftProjectCwd);
         else this.client.request('new-chat', { path: this.draftPath }).catch((error) => this.showError(error));
@@ -152,11 +154,13 @@ class Navigation {
           if (!next.supported) { this.dispose(); showLauncher(next.reason || '当前模式暂不支持项目导航'); return; }
           this.info.folders = next.folders; this.setRegistry(next.registry); this.render();
         }).catch((error) => this.showError(error));
-      } else if (event === 'threads-changed') this.invalidateLists();
+      } else if (event?.type === 'navigation-state-changed') this.applyState(event.state);
+      else if (event?.type === 'state-save-error') this.showError(new Error(event.message));
+      else if (event === 'threads-changed') this.invalidateLists();
       else if (event?.type === 'projects-changed') this.setRegistry(event);
       else if (this.activity.receive(event)) {
         if (event.threadId === this.active && ['started', 'completed'].includes(event.phase)) this.reader.reset();
-        this.render(); this.persist();
+        this.render();
       }
     }));
     const resize = () => {
@@ -402,7 +406,7 @@ class Navigation {
     const next = routeThreadId(route);
     if (this.active === next && !changedProject) return;
     this.reader.reset();
-    if (next && this.activity.acknowledge(next)) this.persist();
+    if (next) this.acknowledge(next);
     this.active = next; const thread = this.threads.find((item) => item.id === next);
     if (thread) this.closed.delete(normalizePath(thread.cwd));
     this.render(); if (next && !thread) this.scheduleRefresh('active');
@@ -594,7 +598,7 @@ class Navigation {
             row.setAttribute('aria-label', `${thread.title}，${indicator.label}`);
           }
           row.addEventListener('click', () => {
-            if (this.activity.acknowledge(thread.id)) { this.render(); this.persist(); }
+            if (this.acknowledge(thread.id)) this.render();
             this.client.request('navigate', { threadId: thread.id }).catch((error) => this.showError(error));
           });
           const more = iconButton('more', '聊天操作', () => this.openChatMenu(thread, more));
@@ -678,16 +682,57 @@ class Navigation {
     this.resizeHandle.addEventListener('pointermove', move); this.resizeHandle.addEventListener('pointerup', end);
     this.resizeHandle.addEventListener('lostpointercapture', end); this.cleanups.push(end);
   }
+  applyState(value) {
+    if (this.disposed || !value || (value.revision ?? 0) < (this.canonicalState.revision ?? 0)) return;
+    this.canonicalState = structuredClone(value);
+    this.state = overlayNavigationEdits(value, [...this.inFlightEdits, ...this.pendingEdits]);
+    this.editBase = structuredClone(this.state); this.closed = new Set(this.state.groups);
+    this.activity.unread = new Set(this.state.unread);
+    for (const [id, completion] of this.activity.completedReplies) {
+      if (!this.activity.unread.has(id) || completion.turnToken !== this.state.unreadTurns?.[id]) this.activity.completedReplies.delete(id);
+    }
+    if (this.view === 'active' && this.mode) this.mode.value = this.state.mode;
+    if (this.rail) { this.layout(); this.render(); }
+  }
+  acknowledge(threadId) {
+    const turnToken = this.activity.completedReplies.get(threadId)?.turnToken ?? this.state.unreadTurns?.[threadId] ?? null;
+    const changed = this.activity.acknowledge(threadId);
+    if (changed) this.queueEdits([{ type: 'acknowledge', threadId, turnToken }]);
+    return changed;
+  }
+  queueEdits(edits) {
+    if (this.disposed || !edits.length) return;
+    this.pendingEdits.push(...edits);
+    clearTimeout(this.saveTimer); this.saveTimer = setTimeout(() => {
+      this.flushState().catch((error) => this.showError(error));
+    }, 200);
+  }
+  flushState() {
+    if (this.savePromise) return this.savePromise;
+    if (this.disposed || !this.pendingEdits.length) return Promise.resolve();
+    this.savePromise = (async () => {
+      while (!this.disposed && this.pendingEdits.length) {
+        this.inFlightEdits = this.pendingEdits.splice(0, 2000);
+        try {
+          const result = await this.client.request('save-state', { operations: this.inFlightEdits });
+          this.inFlightEdits = []; this.applyState(result.state);
+        } catch (error) {
+          this.pendingEdits.unshift(...this.inFlightEdits); this.inFlightEdits = [];
+          throw error;
+        }
+      }
+    })().finally(() => { this.savePromise = null; });
+    return this.savePromise;
+  }
   persist() {
     if (this.disposed) return;
-    this.state.unread = [...this.activity.unread];
-    clearTimeout(this.saveTimer); this.saveTimer = setTimeout(() => {
-      this.client.request('save-state', { state: { ...this.state, groups: [...this.closed] } }).catch((error) => this.showError(error));
-    }, 200);
+    const next = { ...this.state, groups: [...this.closed] };
+    const edits = navigationEdits(this.editBase, next);
+    this.editBase = structuredClone(next); this.queueEdits(edits);
   }
   async disable() {
     this.state.unread = [...this.activity.unread];
-    try { await this.client.request('save-state', { state: { ...this.state, groups: [...this.closed], disabled: true } }); }
+    try { await this.client.request('save-state', { operations: [{ type: 'set', key: 'disabled', value: true }] }); }
     catch (error) { this.showError(error); return; }
     this.dispose(); showLauncher('启用项目导航');
   }
@@ -722,7 +767,7 @@ async function start(force = false) {
     if (!info.supported) { client.dispose(); started = false; showLauncher(info.reason || '当前模式暂不支持项目导航'); return; }
     if (info.state.disabled && !force) { client.dispose(); started = false; showLauncher('启用项目导航'); return; }
     info.state.disabled = false;
-    if (force) await client.request('save-state', { state: info.state });
+    if (force) info.state = (await client.request('save-state', { operations: [{ type: 'set', key: 'disabled', value: false }] })).state;
     document.getElementById('vcl-launcher')?.remove(); navigation = new Navigation(client, bridge, info);
     const dispose = navigation.dispose.bind(navigation); navigation.dispose = () => { dispose(); started = false; };
     navigation.mount();

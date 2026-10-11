@@ -1,6 +1,8 @@
+import fs from 'node:fs/promises';
+import vm from 'node:vm';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { normalizePath, projectName, groupThreads, routeThreadId, loadAllThreads, ThreadActivity } from '../webview/core.mjs';
+import { normalizePath, projectName, groupThreads, routeThreadId, loadAllThreads, ThreadActivity, navigationEdits, overlayNavigationEdits } from '../webview/core.mjs';
 import { LayerClient } from '../webview/client.mjs';
 
 test('目录选择等待用户，其他请求保持超时，关闭面板取消等待', async (t) => {
@@ -201,4 +203,46 @@ test('读取全部分页并去重，拒绝循环游标和中途取消', async ()
   await assert.rejects(loadAllThreads(async () => {
     controller.abort(); return { data: [], nextCursor: null };
   }, { signal: controller.signal }), { name: 'AbortError' });
+});
+
+async function navigationFixture(client, timers = { setTimeout, clearTimeout }) {
+  const source = await fs.readFile(new URL('../webview/layer.mjs', import.meta.url), 'utf8');
+  const context = vm.createContext({ ...timers, structuredClone, ThreadActivity, navigationEdits,
+    overlayNavigationEdits, AbortController, loadAllThreads, groupThreads, normalizePath, routeThreadId,
+    URL, document: { activeElement: null, querySelector: () => null },
+  });
+  vm.runInContext(source.slice(source.indexOf('const SVG'), source.indexOf('const bridge = globalThis'))
+    + '\nglobalThis.Navigation=Navigation;function showLauncher(){}', context);
+  const state = { revision: 0, mode: 'all', width: 250, collapsed: null, disabled: false,
+    groups: [], pinnedProjects: [], unread: [], unreadTurns: {} };
+  const nav = new context.Navigation(client, {}, { state, folders: [] });
+  nav.render = () => {}; nav.layout = () => {};
+  return nav;
+}
+
+test('前端只提交具体操作，广播保留待提交修改，失败重试及旧轮次保护', async () => {
+  let remote = { revision: 0, mode: 'all', width: 250, groups: [], pinnedProjects: [], unread: [], unreadTurns: {} };
+  let fail = true;
+  const requests = [];
+  const nav = await navigationFixture({ async request(method, params) {
+    requests.push(params); assert.equal(method, 'save-state');
+    if (fail) throw new Error('保存失败');
+    remote = { ...overlayNavigationEdits(remote, params.operations), revision: remote.revision + 1 };
+    return { state: remote };
+  } }, { setTimeout: () => 1, clearTimeout() {} });
+  nav.state.width = 310; nav.persist();
+  const incoming = { ...remote, revision: 1, pinnedProjects: [{ path: '/other', name: 'Other' }] };
+  remote = incoming; nav.applyState(incoming);
+  assert.equal(nav.state.width, 310); assert.equal(nav.state.pinnedProjects[0].path, '/other');
+  await assert.rejects(nav.flushState(), /保存失败/);
+  fail = false; await nav.flushState();
+  assert.equal(remote.width, 310); assert.equal(remote.pinnedProjects[0].path, '/other');
+  assert.deepEqual(JSON.parse(JSON.stringify(requests.at(-1).operations)), [{ type: 'set', key: 'width', value: 310 }]);
+  nav.applyState({ ...remote, revision: 0, width: 180 });
+  assert.equal(nav.state.width, 310, '迟到状态不能覆盖新版本');
+  remote = { ...remote, revision: remote.revision + 1, unread: ['thread'], unreadTurns: { thread: 'new-turn' } };
+  nav.queueEdits([{ type: 'acknowledge', threadId: 'thread', turnToken: 'old-turn' }]);
+  nav.applyState(remote);
+  assert.ok(nav.activity.unread.has('thread'), '旧轮次待提交回执不能隐藏新提醒');
+  await nav.flushState(); assert.ok(remote.unread.includes('thread'));
 });
