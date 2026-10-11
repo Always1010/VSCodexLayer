@@ -7,6 +7,26 @@ const REQUEST = 'vscodex-layer/request';
 const RESPONSE = 'vscodex-layer/response';
 const EVENT = 'vscodex-layer/event';
 const STATE_KEY = 'vscodexLayer.navigationState.v1';
+const PROJECTS_KEY = 'vscodexLayer.projects.v1';
+const projectStores = new WeakMap();
+
+function directoryKey(directory) {
+  const resolved = path.resolve(directory);
+  return process.platform === 'win32' ? resolved.toLowerCase() : resolved;
+}
+
+function cleanProjects(value = {}) {
+  value ??= {};
+  const projects = new Map();
+  for (const project of Array.isArray(value.projects) ? value.projects : []) {
+    const directory = project?.path;
+    if (typeof directory !== 'string' || directory.length > 4096 || directory.includes('\0') || !path.isAbsolute(directory)) continue;
+    projects.set(directoryKey(directory), { path: path.resolve(directory) });
+    if (projects.size === 2000) break;
+  }
+  return { revision: Number.isSafeInteger(value.revision) && value.revision >= 0 ? value.revision : 0,
+    projects: [...projects.values()] };
+}
 
 function cleanState(value = {}) {
   const pins = new Map();
@@ -116,6 +136,37 @@ exports.createLayerHost = function createLayerHost({ vscode, provider, webview, 
     return { opened: true };
   }
   const post = (message) => { if (!disposed) Promise.resolve(webview.postMessage(message)).catch(() => {}); };
+  let projectStore = projectStores.get(provider.globalState);
+  if (!projectStore) {
+    projectStore = { queue: Promise.resolve(), listeners: new Set() };
+    projectStores.set(provider.globalState, projectStore);
+  }
+  const projectsChanged = (registry) => post({ type: EVENT, event: { type: 'projects-changed', ...registry } });
+  projectStore.listeners.add(projectsChanged);
+  disposables.push({ dispose() { projectStore.listeners.delete(projectsChanged); } });
+  async function readProjects() {
+    await projectStore.queue;
+    return cleanProjects(await provider.globalState.get(PROJECTS_KEY));
+  }
+  function changeProjects(cwd, add) {
+    const operation = projectStore.queue.then(async () => {
+      if (disposed) throw new Error('聊天面板已关闭。');
+      const registry = cleanProjects(await provider.globalState.get(PROJECTS_KEY));
+      const index = registry.projects.findIndex((project) => directoryKey(project.path) === directoryKey(cwd));
+      const changed = add ? index < 0 : index >= 0;
+      if (changed) {
+        if (add && registry.projects.length >= 2000) throw new Error('手动项目数量已达上限，请先移除不再使用的添加记录。');
+        if (add) registry.projects.push({ path: cwd }); else registry.projects.splice(index, 1);
+        registry.revision += 1;
+        await provider.globalState.update(PROJECTS_KEY, registry);
+        for (const listener of projectStore.listeners) listener(registry);
+      }
+      return { ...registry, cwd: index >= 0 && add ? registry.projects[index].path : cwd, changed };
+    });
+    // Failed writes must not block later edits from this or another panel.
+    projectStore.queue = operation.catch(() => {});
+    return operation;
+  }
   const folders = () => (vscode.workspace.workspaceFolders ?? []).map((folder) => ({
     name: folder.name, path: folder.uri.fsPath, scheme: folder.uri.scheme, authority: folder.uri.authority,
   }));
@@ -157,11 +208,14 @@ exports.createLayerHost = function createLayerHost({ vscode, provider, webview, 
       } catch (error) { clearTimeout(timer); pending.delete(id); reject(error); }
     });
   }
-  async function validateProject(cwd) {
+  function projectPath(cwd) {
     if (typeof cwd !== 'string' || !cwd || cwd.length > 4096 || cwd.includes('\0') || !path.isAbsolute(cwd)) {
       throw new Error('项目必须具有当前运行主机上的有效绝对目录。');
     }
-    const directory = path.resolve(cwd);
+    return path.resolve(cwd);
+  }
+  async function validateProject(cwd) {
+    const directory = projectPath(cwd);
     try {
       if (!(await fs.stat(directory)).isDirectory()) throw new Error('not a directory');
       await fs.access(directory, constants.R_OK);
@@ -170,7 +224,7 @@ exports.createLayerHost = function createLayerHost({ vscode, provider, webview, 
   }
   async function run(method, params) {
     if (method === 'init') return { ...support(), folders: folders(),
-      state: cleanState(await provider.globalState.get(STATE_KEY)), version: provider.extensionVersion };
+      state: cleanState(await provider.globalState.get(STATE_KEY)), registry: await readProjects(), version: provider.extensionVersion };
     const environment = support();
     if (!environment.supported) throw new Error(environment.reason);
     if (method === 'open-reasoning-view') return openReader(params);
@@ -201,6 +255,25 @@ exports.createLayerHost = function createLayerHost({ vscode, provider, webview, 
       return { path: params.path };
     }
     if (method === 'validate-project') return validateProject(params.cwd);
+    if (method === 'pick-project-folder') {
+      const selected = await vscode.window.showOpenDialog({ canSelectFiles: false, canSelectFolders: true,
+        canSelectMany: false, title: '添加项目文件夹', openLabel: '选择项目文件夹' });
+      if (!selected?.length || disposed) return { cancelled: true };
+      const uri = selected[0];
+      if (uri.scheme !== 'file' || environment.mode === 'ssh-remote' && uri.authority) {
+        throw new Error('请选择当前运行主机上的文件夹。');
+      }
+      return validateProject(uri.fsPath);
+    }
+    if (method === 'add-project') {
+      const { cwd } = await validateProject(params.cwd);
+      return changeProjects(cwd, true);
+    }
+    if (method === 'remove-project') return changeProjects(projectPath(params.cwd), false);
+    if (method === 'copy-project-path') {
+      await vscode.env.clipboard.writeText(projectPath(params.cwd));
+      return { copied: true };
+    }
     if (method === 'new-project-chat') {
       if (!['/', '/extension/panel/new'].includes(params.path)) throw new Error('空白聊天入口无效。');
       const { cwd } = await validateProject(params.cwd);
