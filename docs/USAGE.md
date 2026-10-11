@@ -30,7 +30,7 @@ node tools/layer.mjs restore --confirm
 
 ## Remote SSH 使用
 
-支持 Windows VS Code 客户端通过 Remote SSH 连接 Rock 5B 等 Linux 主机。增强层必须随 Codex 扩展运行在远程工作区宿主；宿主检查要求当前扩展为 Workspace 类型、运行平台为 Linux、插件为该宿主的文件资源，工作区目录属于同一 SSH authority。WSL、容器、虚拟工作区及运行在 Windows 客户端的 Codex 扩展暂不支持。可用 VS Code 的“Developer: Show Running Extensions”确认运行位置。
+支持 Windows VS Code 客户端通过 Remote SSH 连接 Rock 5B 等 Linux 主机。增强层必须随 Codex 扩展运行在远程工作区宿主；宿主检查要求当前扩展为 Workspace 类型、运行平台为 Linux、插件为该宿主的文件资源。VS Code 将客户端的 SSH 工作区 URI 转成远程宿主上的 `file:` URI 后传给扩展，因此工作区按当前宿主的绝对文件目录校验；客户端文件对应的 `vscode-local:` URI 与虚拟目录均拒绝。WSL、容器、虚拟工作区及运行在 Windows 客户端的 Codex 扩展暂不支持。可用 VS Code 的“Developer: Show Running Extensions”确认运行位置。
 
 在 5B 上的仓库目录运行只读命令：
 
