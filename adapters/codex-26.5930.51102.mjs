@@ -4,6 +4,7 @@ import { extensionRoot, readOriginal } from '../lib/patch-engine.mjs';
 import { patchProjectCreationMembership } from './codex-compatible.mjs';
 import { buildReasoningPatchFiles } from './reasoning.mjs';
 import { buildChatMenuPatch } from './chat-menu.mjs';
+import { patchProjectDraftReset } from './draft-lifecycle.mjs';
 
 export const VERSION = '26.5930.51102';
 export const ADAPTER = `codex-${VERSION}-v5`;
@@ -68,6 +69,7 @@ export async function buildPatchPlan(directory) {
   originals[2].content = replaceOnce(originals[2].content,
     'if(ZBe(e))return t(Iv,e);', 'if(ZBe(e)||e.startsWith(`vscodex-layer-new:`))return t(Iv,e);');
   // Native draft storage is retained; only project-scoped new composers override directory selection.
+  originals[2].content = patchProjectDraftReset(originals[2].content);
   originals[4].content = replaceOnce(originals[4].content,
     'Iua=Jo(lg,(e,{get:t,scope:n})=>{',
     'Iua=Jo(lg,(e,{get:t,scope:n})=>{let __vclCwd=globalThis.__vscodexLayerBridge?.projectCwd(n.value);'

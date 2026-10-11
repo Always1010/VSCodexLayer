@@ -8,6 +8,7 @@ import { findExtension } from './layer.mjs';
 import { buildPatchPlan, DRAFT_SOURCE } from '../adapters/codex-26.5930.51102.mjs';
 import { applyPatch, restorePatch, sha256, readOriginal } from '../lib/patch-engine.mjs';
 import { checkNativeReasoning } from './native-reasoning.mjs';
+import { checkNativeDraftLifecycle } from './native-draft-lifecycle.mjs';
 import { checkNativeChatMenu } from './native-chat-menu.mjs';
 
 // Only read the real installation. Exercise mutations in a newly created fixture.
@@ -21,6 +22,7 @@ await checkNativeChatMenu(plan);
 // Exercise the exact supported native draft functions without importing the app or opening VS Code.
 const composerSource = plan.files.find((entry) => entry.path === DRAFT_SOURCE[0]).content;
 const routeSource = plan.files.find((entry) => entry.path === 'webview/assets/app-initial-3a0869cff48f.js').content;
+checkNativeDraftLifecycle(routeSource);
 const functionSource = (source, name) => {
   const start = source.indexOf(`function ${name}(`);
   const end = source.indexOf('}function ', start);
