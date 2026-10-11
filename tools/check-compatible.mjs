@@ -8,6 +8,7 @@ import { createRequire } from 'node:module';
 import { buildCompatiblePatchPlan } from '../adapters/codex-compatible.mjs';
 import { applyPatch, readUnpatched, restorePatch, sha256 } from '../lib/patch-engine.mjs';
 import { findExtension } from './layer.mjs';
+import { checkProjectSubmit } from './native-project-submit.mjs';
 
 const args = process.argv.slice(2);
 if (args.length && (args[0] !== '--extension' || args.length !== 2)) {
@@ -78,6 +79,19 @@ assert.equal((composer.match(/validateProject\(/g) ?? []).length, 1);
 assert.equal((header.match(/data-vcl-home-history/g) ?? []).length, 2);
 assert.equal((header.match(/data-vcl-chat-back/g) ?? []).length, 1);
 
+const runtimeFiles = [];
+for (const name of await fs.readdir(path.join(directory, 'webview', 'assets'))) {
+  if (!name.startsWith('app-initial-') || !name.endsWith('.js')) continue;
+  const source = (await readUnpatched(directory, `webview/assets/${name}`)).toString();
+  if (source.includes('canUseProjectlessWorkspace&&') && source.includes('createProjectlessThreadWorkspace')) runtimeFiles.push(source);
+}
+assert.equal(runtimeFiles.length, 1, '首次消息工作区运行时必须唯一');
+const regressionComposer = composer.replace(/baseParams:[\w$]+\.vclProjectCwd!==undefined\?\{\.\.\.([\w$]+),projectAssignment:undefined\}:[\w$]+,prepareFirstTurn:/,
+  'baseParams:$1,prepareFirstTurn:');
+assert.notEqual(regressionComposer, composer);
+await checkProjectSubmit(regressionComposer, runtimeFiles[0], /projectless-thread-cwd not supported in extension/);
+await checkProjectSubmit(composer, runtimeFiles[0]);
+
 const temporaryParent = await fs.realpath(os.tmpdir());
 const fixture = await fs.mkdtemp(path.join(temporaryParent, 'vscodex-layer-compatible-'));
 if (!fixture.startsWith(`${temporaryParent}${path.sep}vscodex-layer-compatible-`)) throw new Error('临时验证目录异常。');
@@ -101,5 +115,5 @@ try {
   for (const entry of plan.files.filter((file) => file.originalHash !== null)) {
     assert.equal(sha256(await fs.readFile(path.join(fixture, entry.path))), entry.originalHash);
   }
-  console.log(`官方 ${plan.extensionVersion} 兼容结构校验通过：${plan.compatibility.family}；动态资源、宿主初始化、SSH / WSL 边界、异常日志、转换完整性、语法、临时副本应用、重复应用和恢复均通过。实际插件未修改。`);
+  console.log(`官方 ${plan.extensionVersion} 兼容结构校验通过：${plan.compatibility.family}；动态资源、宿主初始化、SSH / WSL 边界、项目首条消息归属与目录、异常日志、转换完整性、语法、临时副本应用、重复应用和恢复均通过。实际插件未修改。`);
 } finally { await fs.rm(fixture, { recursive: true, force: true }); }

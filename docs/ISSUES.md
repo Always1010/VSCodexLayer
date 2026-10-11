@@ -41,3 +41,13 @@
 - 解决方案：在 Linux Workspace 扩展及插件目录身份检查通过后，接受当前宿主的绝对 `file:` 目录；拒绝客户端 `vscode-local:`、虚拟 URI、非空 authority 和相对路径。接入检查同步使用真实远程宿主 URI。
 - 验证：4 项宿主回归测试及当前 Linux ARM64 插件临时副本接入检查通过；提取已安装 VS Code Server 的真实 URI 转换器后执行同一初始化请求，旧补丁返回 `supported: false`，仓库修复返回 `supported: true`。用户关闭 VS Code 并授权后，已更新远程 `26.51007.21434-linux-arm64` 插件补丁；11 个补丁文件与当前计划一致，已安装宿主初始化返回 `supported: true`、`mode: ssh-remote`。真实窗口验收待重新连接后进行。
 - 相关文件：`runtime/host.cjs`、`tests/host.test.mjs`、`tools/check-compatible.mjs`、`docs/USAGE.md`。
+
+## ISSUE-005：项目聊天首条消息触发扩展不支持的无项目目录分配
+
+- 日期：2026-10-11
+- 状态：已解决（仓库修复；已安装补丁待更新）
+- 现象：点击项目行的 `＋` 后发送第一条消息，线程已创建，但发送报错 `projectless-thread-cwd not supported in extension`。
+- 原因：目录草稿没有桌面项目编号，官方创建参数生成了 `projectAssignment: null`。当前官方归属保存回调将空归属登记为无项目线程，首次消息的工作区选择随后尝试调用仅桌面端支持的目录分配接口。此前接入检查截停在创建请求前，未覆盖归属保存和首次消息工作区判断。
+- 解决方案：仅对携带 `vclProjectCwd` 的目录草稿，将创建参数的 `projectAssignment` 留为 `undefined`，跳过桌面项目归属保存，保留经过校验的目录、工作区根及原生消息发送；普通聊天和桌面无项目线程保持官方行为。
+- 验证：当前 `26.51007.21434-linux-arm64` 的隔离检查执行官方 Composer、参数转换、真实归属回调及首次消息工作区判断；旧逻辑复现同一报错，修复后三个不同目录的首次消息准备通过，目录失效时不创建线程。语法、临时副本应用、重复应用和恢复通过；实际插件更新及真实窗口发送待进行。Windows 严格模式同步使用同一转换，当前环境仅完成语法检查。已创建失败线程的历史和归属不自动改写，修复后通过项目 `＋` 新建聊天验证。
+- 相关文件：`adapters/codex-compatible.mjs`、`adapters/codex-26.5930.51102.mjs`、`tools/native-project-submit.mjs`、`tools/check-compatible.mjs`、`tools/check-adapter.mjs`、`docs/USAGE.md`。
