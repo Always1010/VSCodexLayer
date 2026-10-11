@@ -23,7 +23,9 @@ export class LayerClient {
   request(method, params = {}) {
     const id = crypto.randomUUID();
     return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => {
+      // The native folder picker waits for a person; the panel lifecycle still
+      // cancels it on disposal. Other host requests retain their normal deadline.
+      const timer = method === 'pick-project-folder' ? undefined : setTimeout(() => {
         this.pending.delete(id);
         reject(new Error('增强消息超时，请刷新或返回原版界面。'));
       }, 30000);

@@ -1,6 +1,23 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { normalizePath, projectName, groupThreads, routeThreadId, loadAllThreads, ThreadActivity } from '../webview/core.mjs';
+import { LayerClient } from '../webview/client.mjs';
+
+test('目录选择等待用户，其他请求保持超时，关闭面板取消等待', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  let listener; const messages = [];
+  const surface = { location: { origin: 'https://test.local' },
+    addEventListener(_event, callback) { listener = callback; }, removeEventListener() {} };
+  const client = new LayerClient({ postMessage(message) { messages.push(message); } }, surface);
+  const picker = client.request('pick-project-folder');
+  const ordinary = assert.rejects(client.request('list'), /超时/);
+  t.mock.timers.tick(31000); await ordinary;
+  assert.equal(client.pending.size, 1, '不能因默认请求超时打断用户选择目录');
+  listener({ origin: surface.location.origin, data: { type: 'vscodex-layer/response', id: messages[0].id, result: { cwd: '/chosen' } } });
+  assert.equal((await picker).cwd, '/chosen');
+  const abandoned = assert.rejects(client.request('pick-project-folder'), /导航已关闭/);
+  client.dispose(); await abandoned; assert.equal(client.pending.size, 0);
+});
 
 test('提醒优先于运行，结束提示保留至查看，新轮次清除旧提示', () => {
   const activity = new ThreadActivity();

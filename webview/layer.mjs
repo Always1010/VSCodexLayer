@@ -12,6 +12,7 @@ const icons = {
   plus: ['M12 5v14', 'M5 12h14'],
   pin: ['M16 3l5 5-4 1-4 4-1 4-5-5 4-1 4-4Z', 'm2 22 5-5'],
   more: ['M5 12h.01', 'M12 12h.01', 'M19 12h.01'],
+  folderPlus: ['M3 7V5a2 2 0 0 1 2-2h5l2 3h7a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z', 'M12 10v8', 'M8 14h8'],
 };
 
 function element(tag, className, text) {
@@ -47,6 +48,7 @@ class Navigation {
     this.activity = new ThreadActivity(this.state.unread);
     this.draftPath = '/';
     this.projectCwd = null; this.draftProjectCwd = null;
+    this.registry = info.registry ?? { revision: 0, projects: [] };
     this.abort = new AbortController(); this.cleanups = []; this.disposed = false;
   }
   mount() {
@@ -70,12 +72,19 @@ class Navigation {
     this.search.setAttribute('aria-label', '搜索项目或聊天');
     this.search.addEventListener('input', () => { this.query = this.search.value; this.render(); });
     this.projectContext = element('div', 'vcl-project-context'); this.projectContext.setAttribute('role', 'status');
-    search.append(icon('search'), this.search); controls.append(selectLabel, this.mode, search, this.projectContext);
+    this.projectNotice = element('div', 'vcl-project-notice'); this.projectNotice.setAttribute('role', 'status');
+    this.projectNotice.setAttribute('aria-live', 'polite');
+    this.addProjectButton = iconButton('folderPlus', '添加项目文件夹', () => this.toggleProjectForm());
+    this.addProjectButton.id = 'vcl-add-project'; this.addProjectButton.setAttribute('aria-expanded', 'false');
+    this.addProjectButton.setAttribute('aria-controls', 'vcl-project-form');
+    const scopeRow = element('div', 'vcl-scope-row'); scopeRow.append(this.mode, this.addProjectButton);
+    search.append(icon('search'), this.search);
+    controls.append(selectLabel, scopeRow, this.buildProjectForm(), search, this.projectContext, this.projectNotice);
     this.status = element('div', 'vcl-status', '正在读取聊天…');
     this.status.setAttribute('role', 'status'); this.status.setAttribute('aria-live', 'polite');
     this.list = element('div', 'vcl-list'); this.list.setAttribute('aria-label', '项目和聊天');
     this.list.addEventListener('keydown', (event) => this.onListKey(event));
-    this.list.addEventListener('scroll', () => this.dismissNativeMenu());
+    this.list.addEventListener('scroll', () => { this.dismissNativeMenu(); this.closeProjectMenu(); });
     const footer = element('div', 'vcl-footer'); this.count = element('span', 'vcl-count');
     footer.append(this.count, iconButton('back', '返回原版界面', () => this.disable()));
     this.resizeHandle = element('div', 'vcl-resize'); this.resizeHandle.tabIndex = 0;
@@ -116,16 +125,17 @@ class Navigation {
       if (event === 'workspace-changed') {
         this.client.request('init').then((next) => {
           if (!next.supported) { this.dispose(); showLauncher(next.reason || '当前模式暂不支持项目导航'); return; }
-          this.info.folders = next.folders; this.render();
+          this.info.folders = next.folders; this.setRegistry(next.registry); this.render();
         }).catch((error) => this.showError(error));
       } else if (event === 'threads-changed') this.scheduleRefresh();
+      else if (event?.type === 'projects-changed') this.setRegistry(event);
       else if (this.activity.receive(event)) {
         if (event.threadId === this.active && ['started', 'completed'].includes(event.phase)) this.reader.reset();
         this.render(); this.persist();
       }
     }));
     const resize = () => {
-      this.dismissNativeMenu(); this.layout();
+      this.dismissNativeMenu(); this.closeProjectMenu(); this.layout();
     }; window.addEventListener('resize', resize);
     this.cleanups.push(() => window.removeEventListener('resize', resize));
     const keydown = (event) => {
@@ -139,7 +149,138 @@ class Navigation {
     this.layout(); this.render(); this.refresh();
   }
   isCollapsed() { return this.state.collapsed ?? window.innerWidth < 640; }
+  buildProjectForm() {
+    this.projectForm = element('form', 'vcl-project-form'); this.projectForm.id = 'vcl-project-form'; this.projectForm.hidden = true;
+    this.projectForm.setAttribute('aria-label', '添加项目文件夹');
+    const label = element('label', '', '文件夹路径'); label.htmlFor = 'vcl-project-path';
+    this.projectPath = element('input', 'vcl-path-input'); this.projectPath.id = 'vcl-project-path';
+    this.projectPath.type = 'text'; this.projectPath.autocomplete = 'off'; this.projectPath.spellcheck = false;
+    this.projectPath.placeholder = '输入绝对文件夹路径'; this.projectPath.required = true;
+    this.projectPath.setAttribute('aria-describedby', 'vcl-project-help vcl-project-error');
+    this.projectPath.addEventListener('input', () => this.projectFormError(''));
+    const pathRow = element('div', 'vcl-path-row');
+    this.pickProjectButton = iconButton('folder', '选择文件夹', () => this.pickProjectFolder());
+    pathRow.append(this.projectPath, this.pickProjectButton);
+    const help = element('div', 'vcl-form-help', this.info.mode === 'ssh-remote' ? '使用当前远程主机上的目录' : '使用本机上的目录');
+    help.id = 'vcl-project-help';
+    this.projectError = element('div', 'vcl-form-error'); this.projectError.id = 'vcl-project-error'; this.projectError.setAttribute('role', 'alert');
+    const actions = element('div', 'vcl-form-actions');
+    const start = element('button', 'vcl-action vcl-primary', '添加并新建聊天'); start.type = 'submit';
+    const add = element('button', 'vcl-action', '仅添加'); add.type = 'button'; add.addEventListener('click', () => this.addProject(false));
+    const cancel = element('button', 'vcl-action', '取消'); cancel.type = 'button'; cancel.addEventListener('click', () => this.toggleProjectForm(false));
+    actions.append(start, add, cancel);
+    this.projectForm.append(element('strong', '', '添加项目文件夹'), label, pathRow, help, this.projectError, actions);
+    this.projectForm.addEventListener('submit', (event) => { event.preventDefault(); this.addProject(true); });
+    this.projectForm.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape' && !event.isComposing) { event.preventDefault(); this.toggleProjectForm(false); }
+    });
+    return this.projectForm;
+  }
+  toggleProjectForm(open = this.projectForm.hidden) {
+    if (this.projectBusy) return;
+    this.dismissNativeMenu(); this.closeProjectMenu();
+    this.projectForm.hidden = !open; this.addProjectButton.setAttribute('aria-expanded', String(open));
+    if (open) { this.projectFormError(''); this.notifyProject(''); this.projectPath.focus(); } else this.addProjectButton.focus({ preventScroll: true });
+  }
+  notifyProject(message, error = false) {
+    this.projectNotice.textContent = message; this.projectNotice.classList.toggle('vcl-error', error);
+  }
+  projectFormError(message) {
+    this.projectError.textContent = message; this.projectPath.setAttribute('aria-invalid', String(!!message));
+  }
+  projectFormBusy(busy) {
+    this.projectBusy = busy; this.projectForm.setAttribute('aria-busy', String(busy));
+    for (const control of this.projectForm.querySelectorAll('button,input')) control.disabled = busy;
+    this.addProjectButton.disabled = busy;
+  }
+  setRegistry(value) {
+    if (!value || !Number.isSafeInteger(value.revision) || !Array.isArray(value.projects) || value.revision < this.registry.revision || this.disposed) return;
+    this.registry = { revision: value.revision, projects: value.projects }; this.render();
+  }
+  async pickProjectFolder() {
+    if (this.projectBusy || this.disposed) return;
+    this.projectFormBusy(true); this.projectFormError('');
+    try {
+      const result = await this.client.request('pick-project-folder');
+      if (!this.disposed && !result.cancelled) this.projectPath.value = result.cwd;
+    } catch (error) { if (!this.disposed) this.projectFormError(error.message); }
+    finally { if (!this.disposed) { this.projectFormBusy(false); this.projectPath.focus(); } }
+  }
+  async addProject(startChat) {
+    if (this.projectBusy || this.disposed) return;
+    if (!this.projectPath.value) { this.projectFormError('请输入当前运行主机上的绝对文件夹路径。'); this.projectPath.focus(); return; }
+    this.projectFormBusy(true); this.projectFormError('');
+    let saved = false;
+    try {
+      const result = await this.client.request('add-project', { cwd: this.projectPath.value });
+      if (this.disposed) return;
+      saved = true; this.setRegistry(result);
+      this.state.mode = 'all'; this.mode.value = 'all'; this.query = ''; this.search.value = '';
+      const key = normalizePath(result.cwd); this.closed.delete(key); this.render(); this.persist();
+      this.projectForm.hidden = true; this.addProjectButton.setAttribute('aria-expanded', 'false'); this.projectPath.value = '';
+      this.notifyProject(result.changed ? '已添加项目文件夹。' : '项目已存在，已定位到该项目。');
+      const heading = [...this.list.querySelectorAll('.vcl-project-heading')].find((node) => node.dataset.vclKey === `project:${key}`);
+      heading?.scrollIntoView({ block: 'nearest' }); heading?.focus({ preventScroll: true });
+      heading?.classList.add('vcl-located');
+      if (startChat) await this.client.request('new-project-chat', { path: this.draftPath, cwd: result.cwd });
+    } catch (error) {
+      if (!this.disposed) {
+        if (saved) this.notifyProject(`项目已添加，打开聊天失败：${error.message}；可点击项目 ＋ 重试。`, true);
+        else { this.projectFormError(error.message); }
+      }
+    } finally {
+      if (!this.disposed) { this.projectFormBusy(false); if (!saved) this.projectPath.focus(); }
+    }
+  }
+  closeProjectMenu(restoreFocus = false) {
+    const menu = this.projectMenu;
+    if (!menu) return;
+    const key = menu.dataset.projectKey; this.projectMenuCleanup?.(); menu.remove(); this.projectMenu = null;
+    if (restoreFocus && !this.disposed) {
+      const heading = [...this.list.querySelectorAll('.vcl-project-heading')].find((node) => node.dataset.vclKey === key);
+      (heading ?? this.addProjectButton).focus({ preventScroll: true });
+    }
+  }
+  openProjectMenu(group, heading, point) {
+    if (this.disposed || !group.path) return;
+    this.dismissNativeMenu(); this.closeProjectMenu();
+    const menu = element('div', 'vcl-project-menu'); menu.setAttribute('role', 'menu'); menu.setAttribute('aria-label', `${group.name} 项目操作`);
+    menu.dataset.projectKey = heading.dataset.vclKey;
+    const action = (text, name, callback) => {
+      const button = element('button', '', text); button.type = 'button'; button.setAttribute('role', 'menuitem'); button.dataset.action = name;
+      button.addEventListener('click', () => { this.closeProjectMenu(true); callback(); }); menu.append(button);
+    };
+    action('复制文件夹路径', 'copy-project-path', () => this.client.request('copy-project-path', { cwd: group.path }).catch((error) => this.showError(error)));
+    if (group.registered) action('移除添加记录', 'remove-project', () => this.removeProject(group));
+    this.rail.append(menu); this.projectMenu = menu;
+    const rect = heading.getBoundingClientRect(), size = menu.getBoundingClientRect();
+    menu.style.left = `${Math.max(4, Math.min(point?.x ?? rect.left, window.innerWidth - size.width - 4))}px`;
+    menu.style.top = `${Math.max(4, Math.min(point?.y ?? rect.bottom, window.innerHeight - size.height - 4))}px`;
+    const outside = (event) => { if (!menu.contains(event.target)) this.closeProjectMenu(); };
+    const keyboard = (event) => {
+      if (event.key === 'Escape' || event.key === 'Tab') { if (event.key === 'Escape') event.preventDefault(); this.closeProjectMenu(true); }
+      else if (['ArrowUp', 'ArrowDown', 'Home', 'End'].includes(event.key)) {
+        event.preventDefault(); const items = [...menu.querySelectorAll('button')]; const current = items.indexOf(document.activeElement);
+        const index = event.key === 'Home' ? 0 : event.key === 'End' ? items.length - 1 : (current + (event.key === 'ArrowUp' ? -1 : 1) + items.length) % items.length;
+        items[index].focus();
+      }
+    };
+    document.addEventListener('pointerdown', outside, true); menu.addEventListener('keydown', keyboard);
+    this.projectMenuCleanup = () => { document.removeEventListener('pointerdown', outside, true); };
+    menu.querySelector('button')?.focus({ preventScroll: true });
+  }
+  async removeProject(group) {
+    try {
+      const result = await this.client.request('remove-project', { cwd: group.path });
+      if (this.disposed) return;
+      this.setRegistry(result);
+      const remaining = groupThreads(this.threads, this.info.folders, { registeredProjects: this.registry.projects, pinnedProjects: this.state.pinnedProjects }).some((item) => item.key === group.key);
+      this.notifyProject(remaining ? '已移除添加记录；该项目仍有聊天、属于当前工作区或保持置顶。' : '已移除添加记录，文件夹和聊天均保留。');
+      if (!this.list.contains(document.activeElement) && !this.projectForm.contains(document.activeElement)) this.addProjectButton.focus({ preventScroll: true });
+    } catch (error) { if (!this.disposed) this.showError(error); }
+  }
   toggleNavigation() {
+    this.closeProjectMenu();
     this.state.collapsed = !this.isCollapsed(); this.layout(); this.persist();
     if (this.state.collapsed && this.rail.contains(document.activeElement)) this.rail.querySelector('#vcl-toggle').focus();
   }
@@ -236,6 +377,7 @@ class Navigation {
       this.showError(new Error('请先完成或关闭当前对话框，再打开聊天操作。')); return;
     }
     this.dismissNativeMenu();
+    this.closeProjectMenu();
     this.closeMenuAnchor();
     const rect = button.getBoundingClientRect();
     const anchor = element('div', 'vcl-menu-anchor');
@@ -277,6 +419,7 @@ class Navigation {
     const focused = document.activeElement?.closest('[data-vcl-key]')?.dataset.vclKey;
     const groups = groupThreads(this.threads, this.info.folders, {
       mode: this.state.mode, query: this.query, pinnedProjects: this.state.pinnedProjects,
+      registeredProjects: this.registry.projects,
     });
     const fragment = document.createDocumentFragment(); let visibleThreads = 0;
     this.projectContext.textContent = this.projectCwd === null ? '' : `新聊天 · ${projectName(this.projectCwd)}`;
@@ -350,6 +493,15 @@ class Navigation {
         projectRow.append(pin);
       }
       projectRow.append(create); section.append(projectRow, children); fragment.append(section);
+      if (group.path) {
+        heading.setAttribute('aria-haspopup', 'menu');
+        projectRow.addEventListener('contextmenu', (event) => {
+          event.preventDefault(); this.openProjectMenu(group, heading, event.clientX || event.clientY ? { x: event.clientX, y: event.clientY } : undefined);
+        });
+        heading.addEventListener('keydown', (event) => {
+          if (event.key === 'ContextMenu' || event.key === 'F10' && event.shiftKey) { event.preventDefault(); this.openProjectMenu(group, heading); }
+        });
+      }
     }
     if (!groups.length) fragment.append(element('div', 'vcl-empty', this.query ? '没有匹配的项目或聊天'
       : this.state.mode === 'current' && !this.info.folders.length ? '当前窗口没有本地项目' : '暂无聊天'));
@@ -407,6 +559,7 @@ class Navigation {
     if (this.disposed) return;
     this.disposed = true; this.abort.abort(); clearTimeout(this.refreshTimer); clearTimeout(this.saveTimer);
     this.closeMenuAnchor();
+    this.closeProjectMenu();
     this.bridge.setReasoningEnabled(false);
     for (const cleanup of this.cleanups) cleanup();
     this.rail?.remove(); document.body.classList.remove('vcl-enabled'); document.body.style.removeProperty('--vcl-rail-width');
