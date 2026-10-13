@@ -9,6 +9,7 @@
     "test:patch": "node --test tests/patch-engine.test.mjs",
     "test:host": "node --test tests/host.test.mjs tests/bootstrap.test.mjs",
     "test:navigation": "node --test tests/navigation.test.mjs",
+    "test:agents": "node --test tests/agents.test.mjs",
     "test:compatibility": "node --test tests/compatibility.test.mjs",
     "check:adapter": "node tools/check-adapter.mjs",
     "check:compatible": "node tools/check-compatible.mjs",

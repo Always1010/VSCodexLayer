@@ -35,6 +35,32 @@ function fixture(platform = process.platform, globalState) {
 }
 const flush = () => new Promise((resolve) => setImmediate(resolve));
 
+test('子 Agent 单独分页，调用历史和实时事件只转发必要字段', async (t) => {
+  const f = fixture(); t.after(() => f.host.dispose());
+  const page = f.request('agent-page', { cursor: 'next', archived: true }); await flush();
+  let call = f.requests.at(-1);
+  assert.deepEqual(call[3].sourceKinds, ['subAgentThreadSpawn']); assert.equal(call[3].archived, true);
+  f.callbacks().onResult({ id: call[1], result: { data: [{ id: 'child', source: { subAgent: { thread_spawn: {
+    parent_thread_id: 'root', agent_nickname: 'History' } } }, turns: ['secret'], credentials: 'secret' }], nextCursor: null } });
+  const value = (await page).result;
+  assert.equal(value.data[0].parentThreadId, 'root'); assert.equal(value.data[0].nickname, 'History');
+  assert.equal(JSON.stringify(value).includes('secret'), false);
+  const item = { id: 'spawn', type: 'collabAgentToolCall', tool: 'spawnAgent', status: 'completed',
+    receiverThreadIds: ['child', '../invalid'], prompt: '任务说明', model: 'model', reasoningEffort: 'high',
+    agentsStates: { child: { status: 'completed', message: 'secret' } }, credentials: 'secret' };
+  const history = f.request('agent-history', { threadId: 'root' }); await flush(); call = f.requests.at(-1);
+  assert.equal(call[2], 'thread/read'); assert.equal(call[3].includeTurns, true);
+  f.callbacks().onResult({ id: call[1], result: { thread: { id: 'root', turns: [{ id: 'turn', items: [item,
+    { id: 'reply', type: 'agentMessage', text: 'secret' }, { id: 'reasoning', type: 'reasoning', encryptedContent: 'secret' }] }] } } });
+  const actions = (await history).result.turns[0].actions;
+  assert.equal(actions.length, 1); assert.deepEqual(actions[0].receiverThreadIds, ['child']);
+  assert.equal(JSON.stringify(actions).includes('secret'), false);
+  f.notify({ method: 'item/completed', params: { threadId: 'root', turnId: 'turn', item } });
+  assert.deepEqual(f.messages.at(-1).event.action, actions[0]);
+  f.notify({ method: 'turn/completed', params: { threadId: 'child', turn: { id: 'child-turn', status: 'interrupted' } } });
+  assert.ok(f.messages.some((message) => message.event?.type === 'agent-state' && message.event.status === 'interrupted'));
+});
+
 test('子聊天沿真实父关系返回，排除分叉关系、循环和不匹配响应', async (t) => {
   const f = fixture(); t.after(() => f.host.dispose());
   const reply = async (thread, error) => {
