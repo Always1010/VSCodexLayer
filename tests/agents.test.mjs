@@ -5,6 +5,19 @@ import { AgentOverview } from '../webview/agent-overview.mjs';
 
 const action = (id, tool, receiverThreadIds, states = {}) => ({ id, tool, receiverThreadIds, states });
 
+test('历史运行快照不能把空闲或未加载子聊天显示为仍在运行', () => {
+  const catalog = new AgentCatalog();
+  catalog.page([{ id: 'a', parentThreadId: 'root', status: 'notLoaded' }]);
+  catalog.history('root', [{ id: 'old', actions: [action('spawn', 'spawnAgent', ['a'], { a: 'running' })] }]);
+  assert.equal(catalog.rows('root')[0].statusLabel, '状态未知');
+  catalog.page([{ id: 'a', parentThreadId: 'root', status: 'active', activeFlags: [] }]);
+  assert.equal(catalog.rows('root')[0].statusLabel, '运行中');
+  catalog.page([{ id: 'a', parentThreadId: 'root', status: 'idle' }]);
+  assert.equal(catalog.rows('root')[0].statusLabel, '状态未知');
+  catalog.history('root', [{ id: 'old', actions: [action('spawn', 'spawnAgent', ['a'], { a: 'completed' })] }]);
+  assert.equal(catalog.rows('root')[0].statusLabel, '已完成');
+});
+
 test('关联树按编号去重，本轮包含后代，失败创建与无关聊天不计数', () => {
   const catalog = new AgentCatalog();
   catalog.page([{ id: 'a', parentThreadId: 'root', title: 'A', status: 'idle' },

@@ -76,6 +76,7 @@ export class AgentCatalog {
         const runtime = this.runtime.get(thread.id);
         const taskRevision = thread.taskRevision ?? 0, runtimeRevision = runtime?.revision ?? -1;
         let status = runtimeRevision >= taskRevision ? runtime.status : thread.taskStatus ?? runtime?.status ?? 'unknown';
+        if (!runtime && taskRevision === 0 && thread.status !== 'active' && ['running', 'pendingInit'].includes(status)) status = 'unknown';
         if ((thread.runtimeRevision ?? 0) >= Math.max(taskRevision, runtimeRevision)) {
           if (thread.status === 'active') status = thread.activeFlags?.find((flag) => flag === 'waitingOnApproval' || flag === 'waitingOnUserInput') ?? 'running';
           else if (thread.status === 'systemError') status = 'errored';
