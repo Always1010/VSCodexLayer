@@ -70,6 +70,11 @@ function summary(thread) {
     ...activityStatus(thread.status) };
 }
 
+function parentId(thread) {
+  const parent = thread?.parentThreadId ?? thread?.source?.subAgent?.thread_spawn?.parent_thread_id;
+  return validId(parent) ? parent : null;
+}
+
 function workspaceSupport(vscode, provider, isWsl, platform) {
   const folders = vscode.workspace.workspaceFolders ?? [];
   const unsupported = (reason) => ({ supported: false, mode: 'unsupported', reason });
@@ -261,7 +266,7 @@ exports.createLayerHost = function createLayerHost({ vscode, provider, webview, 
     onFatalError(error) { rejectAll(error); },
   }));
   const threadSources = ['cli', 'vscode', 'appServer'];
-  function list(cursor, archived) {
+  function requestBackend(method, params) {
     return new Promise((resolve, reject) => {
       const id = randomUUID();
       const timer = setTimeout(() => {
@@ -271,12 +276,19 @@ exports.createLayerHost = function createLayerHost({ vscode, provider, webview, 
       }, 25000);
       pending.set(id, { resolve, reject, timer });
       try {
-        provider.codexMcpConnection.sendRequest(name, id, 'thread/list', {
-          limit: 50, cursor: cursor ?? null, sortKey: 'updated_at', archived,
-          sourceKinds: threadSources, useStateDbOnly: true,
-        });
+        provider.codexMcpConnection.sendRequest(name, id, method, params);
       } catch (error) { clearTimeout(timer); pending.delete(id); reject(error); }
     });
+  }
+  function list(cursor, archived) {
+    return requestBackend('thread/list', { limit: 50, cursor: cursor ?? null, sortKey: 'updated_at', archived,
+      sourceKinds: threadSources, useStateDbOnly: true });
+  }
+  async function readThread(threadId, includeTurns = false) {
+    if (!validId(threadId)) throw new Error('聊天编号无效。');
+    const result = await requestBackend('thread/read', { threadId, includeTurns });
+    if (result?.thread?.id !== threadId) throw new Error('官方聊天详情格式发生变化。');
+    return result.thread;
   }
   function projectPath(cwd) {
     if (typeof cwd !== 'string' || !cwd || cwd.length > 4096 || cwd.includes('\0') || !path.isAbsolute(cwd)) {
@@ -314,10 +326,26 @@ exports.createLayerHost = function createLayerHost({ vscode, provider, webview, 
       if (!Array.isArray(result?.data)) throw new Error('官方聊天列表格式发生变化。');
       return { data: result.data.map(summary).filter(Boolean), nextCursor: result.nextCursor ?? null };
     }
+    if (method === 'ancestry') {
+      let thread = await readThread(params.threadId);
+      const current = summary(thread), ancestors = [], seen = new Set([thread.id]);
+      let parent = parentId(thread);
+      while (parent) {
+        if (seen.has(parent) || ancestors.length >= 32) throw new Error('聊天父子关系异常，无法确定返回路径。');
+        seen.add(parent);
+        try { thread = await readThread(parent); }
+        catch { return { thread: current, ancestors: [...ancestors, { id: parent, title: '父聊天' }], complete: false }; }
+        ancestors.push(summary(thread)); parent = parentId(thread);
+      }
+      return { thread: current, ancestors, complete: true };
+    }
     if (method === 'navigate') {
       if (typeof params.threadId !== 'string' || !/^[\w-]{1,200}$/.test(params.threadId)) throw new Error('聊天编号无效。');
       // Target the originating webview, rather than the provider's sidebar-only helper.
-      provider.postMessageToWebview(webview, { type: 'navigate-to-route', path: `/local/${params.threadId}` });
+      const target = `/local/${params.threadId}`;
+      if (params.path !== undefined && (typeof params.path !== 'string' || params.path.length > 16384
+        || !(params.path === target || params.path.startsWith(`${target}?`)) || /[\r\n#]/.test(params.path))) throw new Error('聊天返回路径无效。');
+      provider.postMessageToWebview(webview, { type: 'navigate-to-route', path: params.path ?? target });
       return { threadId: params.threadId };
     }
     if (method === 'new-chat') {

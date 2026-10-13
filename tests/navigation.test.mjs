@@ -3,6 +3,21 @@ import vm from 'node:vm';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { normalizePath, projectName, groupThreads, routeThreadId, loadAllThreads, ThreadActivity, navigationEdits, overlayNavigationEdits } from '../webview/core.mjs';
+import { AgentNavigation } from '../webview/agent-navigation.mjs';
+
+test('切换聊天后迟到的父关系不会覆盖新聊天，销毁后不绘制返回入口', async () => {
+  const pending = new Map(), rendered = [];
+  const nav = Object.assign(Object.create(AgentNavigation.prototype), { sequence: 0,
+    client: { request: (_method, { threadId }) => new Promise((resolve) => pending.set(threadId, resolve)) },
+    clear() {}, renderReturn: (result) => rendered.push(result.thread.id) });
+  const first = nav.onRoute('/local/first'), second = nav.onRoute('/local/second');
+  pending.get('second')({ thread: { id: 'second' }, ancestors: [] }); await second;
+  pending.get('first')({ thread: { id: 'first' }, ancestors: [{ id: 'parent' }] }); await first;
+  assert.deepEqual(rendered, ['second']);
+  const third = nav.onRoute('/local/third'); nav.disposed = true;
+  pending.get('third')({ thread: { id: 'third' }, ancestors: [] }); await third;
+  assert.deepEqual(rendered, ['second']);
+});
 import { LayerClient } from '../webview/client.mjs';
 
 test('目录选择等待用户，其他请求保持超时，关闭面板取消等待', async (t) => {
