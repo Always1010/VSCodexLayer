@@ -10,7 +10,8 @@ const readingOnly = process.argv.length === 3 && process.argv[2] === '--reading'
 const reasoningOnly = process.argv.length === 3 && process.argv[2] === '--reasoning';
 const archiveOnly = process.argv.length === 3 && process.argv[2] === '--archive';
 const listOnly = process.argv.length === 3 && process.argv[2] === '--list';
-if (process.argv.length > 2 && !readingOnly && !reasoningOnly && !archiveOnly && !listOnly) throw new Error('用法：node tools/check-ui.mjs [--reading|--reasoning|--archive|--list]');
+const activityOnly = process.argv.length === 3 && process.argv[2] === '--activity';
+if (process.argv.length > 2 && !readingOnly && !reasoningOnly && !archiveOnly && !listOnly && !activityOnly) throw new Error('用法：node tools/check-ui.mjs [--reading|--reasoning|--archive|--list|--activity]');
 const output = path.join(root, '.scratch', 'ui');
 await fs.mkdir(output, { recursive: true });
 const executable = [
@@ -193,7 +194,51 @@ try {
   await send('Emulation.setDeviceMetricsOverride', { width: 1100, height: 800, deviceScaleFactor: 1, mobile: false }, sessionId);
   await send('Page.navigate', { url: address }, sessionId);
   await waitFor(`document.querySelector('.vcl-count')?.textContent.includes('63 个聊天')`);
-  if (listOnly) {
+  if (activityOnly) {
+    await evaluate(`window.projectHeading=()=>document.querySelector('[data-vcl-key="project:d:/wrk/vscodexlayer"]');
+      window.emitActivity=(threadId,phase,status='idle',activeFlags=[])=>window.postMessage({type:'vscodex-layer/event',event:{type:'thread-activity',threadId,phase,status,activeFlags}},location.origin);
+      window.initialListCalls=mockRequests.filter(request=>request.method==='list').length;projectHeading().click()`);
+    await waitFor(`projectHeading().querySelector('.vcl-running')`);
+    await assertBrowser(`projectHeading().getAttribute('aria-expanded')==='false'&&!projectHeading().querySelector('.vcl-attention')`, '折叠目录没有汇总初始运行状态');
+    await evaluate(`emitActivity('thread-1','completed')`);
+    await waitFor(`projectHeading().querySelector('.vcl-running')&&projectHeading().querySelector('.vcl-attention')`);
+    await assertBrowser(`projectHeading().querySelectorAll('.vcl-running').length===1&&projectHeading().querySelectorAll('.vcl-attention').length===1
+      &&projectHeading().title.includes('正在运行')&&projectHeading().getAttribute('aria-label').includes('需要查看')`, '运行和未读未同时汇总或缺少状态说明');
+    await screenshot('navigation-activity-collapsed.png');
+    await evaluate(`emitActivity('thread-0','completed')`);
+    await waitFor(`!projectHeading().querySelector('.vcl-running')&&projectHeading().querySelector('.vcl-attention')`);
+    await assertBrowser(`projectHeading().querySelectorAll('.vcl-attention').length===1`, '多个完成聊天产生重复蓝点');
+    await evaluate(`emitActivity('thread-1','started','active')`);
+    await waitFor(`projectHeading().querySelector('.vcl-running')&&projectHeading().querySelector('.vcl-attention')`);
+    await assertBrowser(`projectHeading().getAttribute('aria-expanded')==='false'
+      &&mockRequests.filter(request=>request.method==='list').length===initialListCalls`, '状态更新自动展开目录或触发完整分页');
+    await evaluate(`projectHeading().click()`);
+    await assertBrowser(`!projectHeading().querySelector('.vcl-activity')
+      &&document.querySelector('[data-vcl-key="thread:thread-0"] .vcl-attention')
+      &&document.querySelector('[data-vcl-key="thread:thread-1"] .vcl-running')`, '展开没有将状态显示到对应聊天行');
+    await evaluate(`document.querySelector('[data-vcl-key="thread:thread-0"]').click()`);
+    await waitFor(`mockRoute==='/local/thread-0'`);
+    await evaluate(`projectHeading().click()`);
+    await assertBrowser(`projectHeading().querySelector('.vcl-running')&&!projectHeading().querySelector('.vcl-attention')`, '查看完成聊天后目录蓝点没有清除或误清除运行圈');
+    await evaluate(`emitActivity('thread-1','completed')`);
+    await waitFor(`!projectHeading().querySelector('.vcl-running')&&projectHeading().querySelector('.vcl-attention')`);
+    await evaluate(`projectHeading().click();document.querySelector('[data-vcl-key="thread:thread-1"]').click()`);
+    await waitFor(`mockRoute==='/local/thread-1'`);
+    await evaluate(`projectHeading().click()`);
+    await assertBrowser(`!projectHeading().querySelector('.vcl-activity')`, '所有聊天已读后目录状态没有清除');
+    await evaluate(`emitActivity('thread-2','status','active',['waitingOnApproval'])`);
+    await waitFor(`projectHeading().querySelector('.vcl-attention')`);
+    await assertBrowser(`!projectHeading().querySelector('.vcl-running')`, '等待审批错误汇总为进行中');
+    await evaluate(`projectHeading().click();document.querySelector('[data-vcl-key="thread:thread-2"]').click()`);
+    await waitFor(`mockRoute==='/local/thread-2'`);
+    await evaluate(`projectHeading().click()`);
+    await assertBrowser(`projectHeading().querySelector('.vcl-attention')`, '查看误清除折叠目录中的审批提醒');
+    await evaluate(`document.getElementById('vcl-archive').click()`);
+    await waitFor(`document.querySelector('.vcl-archived-thread')&&!document.querySelector('.vcl-loading')`);
+    await evaluate(`document.querySelector('.vcl-project-heading').click()`);
+    await assertBrowser(`!document.querySelector('.vcl-project-heading .vcl-activity')`, '普通聊天状态污染归档目录');
+    console.log('折叠状态专项无头检查通过：初始运行圈、折叠期间实时完成与开始、运行和未读同时显示、同类状态去重、展开定位、已读清除、审批保留、状态事件不读取分页和归档隔离。');
+  } else if (listOnly) {
     await assertBrowser(`document.querySelector('.vcl-project-row').getBoundingClientRect().height===26
       &&document.querySelector('.vcl-thread-row').getBoundingClientRect().height===22
       &&document.querySelector('.vcl-chat-more').getBoundingClientRect().height===22`, '目录、聊天或操作按钮没有采用确认的紧凑行高');

@@ -607,9 +607,17 @@ class Navigation {
       heading.append(icon('chevron', closed ? '' : 'vcl-open'), icon('folder'), element('span', 'vcl-label', group.name));
       if (group.current) heading.append(element('span', 'vcl-current', '当前'));
       heading.append(element('span', 'vcl-group-count', String(group.total)));
-      if (!archived && closed && group.threads.some((thread) => this.activity.indicator(thread)?.kind === 'attention')) {
-        heading.append(this.activityDot({ kind: 'attention', label: '项目中有聊天需要查看' }));
-        heading.setAttribute('aria-label', `${group.name}，项目中有聊天需要查看`);
+      if (!archived && closed) {
+        const kinds = new Set(group.threads.map((thread) => this.activity.indicator(thread)?.kind));
+        const labels = [];
+        for (const [kind, label] of [['running', '项目中有聊天正在运行'], ['attention', '项目中有聊天需要查看']]) {
+          if (!kinds.has(kind)) continue;
+          heading.append(this.activityDot({ kind, label })); labels.push(label);
+        }
+        if (labels.length) {
+          heading.title += `\n${labels.join('\n')}`;
+          heading.setAttribute('aria-label', `${group.name}，${labels.join('，')}`);
+        }
       }
       heading.addEventListener('click', () => {
         if (closedGroups.has(group.key)) closedGroups.delete(group.key); else closedGroups.add(group.key);
