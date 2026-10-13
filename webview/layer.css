@@ -13,7 +13,9 @@ body.vcl-enabled > #root {
   --vcl-muted: var(--vscode-descriptionForeground, #777);
   --vcl-border: var(--vscode-sideBar-border, var(--vscode-panel-border, #e4e4e4));
   --vcl-hover: var(--vscode-list-hoverBackground, #ededed);
-  --vcl-selected: var(--vscode-list-inactiveSelectionBackground, #e6e6e6);
+  --vcl-accent: var(--vscode-textLink-foreground, #2266b3);
+  --vcl-group: color-mix(in srgb, var(--vcl-fg) 6%, var(--vscode-sideBar-background, #f8f8f8));
+  --vcl-selected: color-mix(in srgb, var(--vcl-accent) 14%, var(--vscode-sideBar-background, #f8f8f8));
   position: fixed;
   inset: 0 auto 0 0;
   z-index: 50;
@@ -76,11 +78,12 @@ body.vcl-enabled > #root {
 #vcl-navigation .vcl-status { color: var(--vcl-muted); font-size: 11px; padding: 2px 12px 6px; overflow-wrap: anywhere; }
 #vcl-navigation .vcl-status:empty { display: none; }
 #vcl-navigation .vcl-error { color: var(--vscode-errorForeground, #c42b1c); }
-#vcl-navigation .vcl-list { flex: 1; min-height: 0; overflow: auto; padding: 2px 6px 10px; scrollbar-width: thin; }
-#vcl-navigation .vcl-project { margin-bottom: 6px; }
-#vcl-navigation .vcl-project-row { display: flex; align-items: center; gap: 2px; }
+#vcl-navigation .vcl-list { flex: 1; min-height: 0; overflow: auto; padding: 6px 7px; scrollbar-width: thin; }
+#vcl-navigation .vcl-project { margin-bottom: 2px; }
+#vcl-navigation .vcl-project-row { display: flex; align-items: center; gap: 2px; min-height: 26px; padding-right: 3px; border-radius: 4px; background: var(--vcl-group); }
 #vcl-navigation .vcl-project-row > .vcl-project-heading { flex: 1; min-width: 0; width: auto; }
-#vcl-navigation .vcl-new-chat { flex: 0 0 28px; }
+#vcl-navigation .vcl-project-row > .vcl-icon-button { width: 24px; height: 24px; padding: 5px; }
+#vcl-navigation .vcl-new-chat { flex: 0 0 24px; }
 #vcl-navigation .vcl-project-pin { flex: 0 0 24px; width: 24px; opacity: 0; }
 #vcl-navigation .vcl-project-row:hover .vcl-project-pin,
 #vcl-navigation .vcl-project-row:focus-within .vcl-project-pin,
@@ -93,34 +96,41 @@ body.vcl-enabled > #root {
 #vcl-navigation .vcl-project-notice:empty { display: none; }
 #vcl-navigation .vcl-project-heading, #vcl-navigation .vcl-thread {
   width: 100%; display: flex; align-items: center; text-align: left; gap: 6px;
-  min-height: 32px; border: 0; border-radius: 6px; background: transparent; padding: 6px;
+  border: 0; border-radius: 4px; background: transparent; line-height: 18px;
 }
-#vcl-navigation .vcl-project-heading { font-weight: 500; }
+#vcl-navigation .vcl-project-heading { min-height: 26px; padding: 0 4px 0 5px; font-weight: 600; }
 #vcl-navigation .vcl-project-heading:hover, #vcl-navigation .vcl-thread:hover { background: var(--vcl-hover); }
-#vcl-navigation .vcl-project-heading > .vcl-icon:first-child { width: 12px; flex-basis: 12px; }
+#vcl-navigation .vcl-project-heading > .vcl-icon:first-child { width: 10px; height: 10px; flex-basis: 10px; color: var(--vcl-muted); }
+#vcl-navigation .vcl-project-heading > .vcl-icon:nth-child(2) { color: var(--vcl-accent); fill: color-mix(in srgb, var(--vcl-accent) 9%, transparent); }
 #vcl-navigation .vcl-open { transform: rotate(90deg); }
 #vcl-navigation .vcl-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-#vcl-navigation .vcl-current { padding: 0 4px; font-size: 10px; color: var(--vcl-muted); border: 1px solid var(--vcl-border); border-radius: 3px; white-space: nowrap; }
-#vcl-navigation .vcl-group-count { font-size: 11px; color: var(--vcl-muted); }
-#vcl-navigation .vcl-thread { padding-inline-start: 36px; font-size: 12px; }
-#vcl-navigation .vcl-thread-row { display: flex; align-items: center; border-radius: 6px; }
+#vcl-navigation .vcl-current { padding: 0 4px; font-size: 9px; line-height: 15px; color: var(--vcl-accent); border: 1px solid color-mix(in srgb, var(--vcl-accent) 25%, transparent); border-radius: 3px; white-space: nowrap; }
+#vcl-navigation .vcl-group-count { font-size: 10px; font-weight: 500; color: var(--vcl-muted); font-variant-numeric: tabular-nums; }
+#vcl-navigation .vcl-threads { margin: 2px 0 4px 19px; padding-inline-start: 8px; border-inline-start: 1px solid var(--vcl-border); }
+#vcl-navigation .vcl-thread { min-height: 22px; padding: 0 5px 0 8px; font-size: 12px; gap: 7px; }
+#vcl-navigation .vcl-chat-icon { width: 12px; height: 12px; flex-basis: 12px; color: var(--vcl-muted); opacity: .7; }
+#vcl-navigation .vcl-thread-row { position: relative; display: flex; align-items: center; min-height: 22px; border-radius: 3px; }
 #vcl-navigation .vcl-thread-row:hover { background: var(--vcl-hover); }
 #vcl-navigation .vcl-thread-row .vcl-thread { flex: 1; min-width: 0; width: auto; background: transparent; }
-#vcl-navigation .vcl-chat-more { flex: 0 0 24px; width: 24px; height: 28px; opacity: 0; }
+#vcl-navigation .vcl-chat-more { flex: 0 0 22px; width: 22px; height: 22px; padding: 4px; opacity: 0; }
+#vcl-navigation .vcl-chat-more .vcl-icon { width: 14px; height: 14px; flex-basis: 14px; }
 #vcl-navigation .vcl-thread-row:hover .vcl-chat-more,
 #vcl-navigation .vcl-thread-row:focus-within .vcl-chat-more,
 #vcl-navigation .vcl-menu-open .vcl-chat-more { opacity: 1; }
 .vcl-menu-anchor { position: fixed; width: 28px; height: 28px; opacity: 0; pointer-events: none; z-index: 70; }
 #vcl-navigation .vcl-selected { background: var(--vcl-selected); color: var(--vscode-list-inactiveSelectionForeground, var(--vcl-fg)); }
-#vcl-navigation .vcl-activity { width: 6px; height: 6px; flex: 0 0 6px; border-radius: 50%; background: var(--vscode-testing-runAction, #2c9b55); }
-#vcl-navigation .vcl-attention { width: 8px; height: 8px; flex-basis: 8px; background: #3794ff; }
-#vcl-navigation .vcl-empty-project { padding: 5px 6px 8px 36px; color: var(--vcl-muted); font-size: 12px; }
+#vcl-navigation .vcl-thread-row.vcl-selected::before { content: ''; position: absolute; inset-inline-start: 0; width: 2px; height: 16px; border-radius: 2px; background: var(--vcl-accent); }
+#vcl-navigation .vcl-selected .vcl-chat-icon { color: var(--vcl-accent); opacity: 1; }
+#vcl-navigation .vcl-activity { border-radius: 50%; flex-shrink: 0; }
+#vcl-navigation .vcl-running { width: 12px; height: 12px; flex-basis: 12px; border: 1.5px solid color-mix(in srgb, var(--vscode-testing-runAction, #2c9b55) 25%, transparent); border-top-color: var(--vscode-testing-runAction, #2c9b55); border-right-color: var(--vscode-testing-runAction, #2c9b55); }
+#vcl-navigation .vcl-attention { width: 6px; height: 6px; flex-basis: 6px; margin-inline: 3px; background: #3794ff; }
+#vcl-navigation .vcl-empty-project { padding: 2px 5px 4px 8px; color: var(--vcl-muted); font-size: 12px; }
 #vcl-navigation .vcl-empty { padding: 22px 12px; text-align: center; color: var(--vcl-muted); }
 #vcl-navigation .vcl-footer { min-height: 36px; display: flex; align-items: center; justify-content: space-between; padding: 4px 8px 4px 12px; border-top: 1px solid var(--vcl-border); }
 #vcl-navigation .vcl-count { font-size: 10px; color: var(--vcl-muted); }
 #vcl-navigation [hidden] { display: none !important; }
 #vcl-navigation .vcl-footer-actions { display: flex; gap: 2px; }
-#vcl-navigation .vcl-archived-thread { flex-direction: column; align-items: flex-start; gap: 2px; min-width: 0; }
+#vcl-navigation .vcl-archived-thread { flex-direction: column; align-items: flex-start; gap: 2px; min-width: 0; padding: 4px 8px; }
 #vcl-navigation .vcl-archived-thread .vcl-label { max-width: 100%; }
 #vcl-navigation .vcl-thread-meta { color: var(--vcl-muted); font-size: 10px; }
 #vcl-navigation .vcl-restore { flex-shrink: 0; }
@@ -136,6 +146,7 @@ body.vcl-enabled > #root {
 #vcl-launcher { position: fixed; z-index: 50; bottom: 12px; left: 10px; background: var(--vscode-sideBar-background, #f8f8f8); color: var(--vscode-sideBar-foreground, #252525); border: 1px solid var(--vscode-panel-border, #ddd); }
 @media (prefers-reduced-motion: no-preference) {
   #vcl-navigation .vcl-loading .vcl-icon { animation: vcl-spin 1.4s linear infinite; }
+  #vcl-navigation .vcl-running { animation: vcl-spin .85s linear infinite; }
 }
 @keyframes vcl-spin { to { transform: rotate(360deg); } }
 [data-vcl-reasoning-summary] {
