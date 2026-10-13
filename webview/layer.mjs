@@ -5,6 +5,7 @@ import { AgentNavigation } from './agent-navigation.mjs';
 import { AgentOverview } from './agent-overview.mjs';
 
 const SVG = 'http://www.w3.org/2000/svg';
+const DEFAULT_VISIBLE_THREADS = 5;
 const icons = {
   panel: ['M8 3v18', 'M5 3h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Z'],
   refresh: ['M20 7v5h-5', 'M4 17v-5h5', 'M6.1 7a7 7 0 0 1 11.6-2L20 8', 'M4 16l2.3 3a7 7 0 0 0 11.6-2'],
@@ -55,6 +56,7 @@ class Navigation {
     this.canonicalState = structuredClone(info.state); this.editBase = structuredClone(info.state);
     this.pendingEdits = []; this.inFlightEdits = [];
     this.threads = []; this.closed = new Set(this.state.groups); this.query = ''; this.active = null;
+    this.expandedProjects = new Set();
     this.view = 'active'; this.revision = 0; this.membership = new Map();
     this.pendingThreads = new Map();
     this.archiveView = { threads: [], closed: new Set(), query: '', mode: 'all', revision: 0 };
@@ -447,8 +449,14 @@ class Navigation {
     this.reader.reset();
     if (next) this.acknowledge(next);
     this.active = next; const thread = this.threads.find((item) => item.id === next);
-    if (thread) this.closed.delete(normalizePath(thread.cwd));
+    if (thread) this.revealThread(thread);
     this.render(); if (next && !thread) this.scheduleRefresh('active');
+  }
+  revealThread(thread) {
+    const key = normalizePath(thread.cwd);
+    this.closed.delete(key);
+    const group = groupThreads(this.threads, this.info.folders).find((item) => item.key === key);
+    if (group?.threads.findIndex((item) => item.id === thread.id) >= DEFAULT_VISIBLE_THREADS) this.expandedProjects.add(key);
   }
   async newProjectChat(cwd) {
     if (this.creating || this.disposed) return;
@@ -500,7 +508,7 @@ class Navigation {
       }
       target.hasLoaded = true; target.dirty = changed;
       const active = target.threads.find((thread) => thread.id === this.active);
-      if (view === 'active' && (firstLoad || !knownActive) && active) this.closed.delete(normalizePath(active.cwd));
+      if (view === 'active' && (firstLoad || !knownActive) && active) this.revealThread(active);
       if (this.view === view) { this.status.textContent = ''; this.render(); }
     } catch (error) {
       target.error = error.message; target.dirty = true;
@@ -596,6 +604,7 @@ class Navigation {
     this.list.setAttribute('aria-busy', String(!!target.loading));
     const scrollTop = this.list.scrollTop;
     const focused = document.activeElement?.closest('[data-vcl-key]')?.dataset.vclKey;
+    const focusedProject = document.activeElement?.closest('.vcl-project')?.querySelector('.vcl-project-heading')?.dataset.vclKey;
     const groups = groupThreads(target.threads, this.info.folders, {
       mode: archived ? target.mode : this.state.mode, query, archived,
       pinnedProjects: archived ? [] : this.state.pinnedProjects,
@@ -607,6 +616,9 @@ class Navigation {
     for (const [index, group] of groups.entries()) {
       visibleThreads += group.threads.length; const section = element('section', 'vcl-project');
       const closed = !query && closedGroups.has(group.key);
+      const limited = !archived && !query && !this.expandedProjects.has(group.key);
+      const shownThreads = limited ? group.threads.slice(0, DEFAULT_VISIBLE_THREADS) : group.threads;
+      const hiddenThreads = closed ? group.threads : limited ? group.threads.slice(DEFAULT_VISIBLE_THREADS) : [];
       const heading = element('button', 'vcl-project-heading'); heading.type = 'button';
       heading.dataset.vclKey = `project:${group.key}`; heading.title = group.path || '无法确定工作目录';
       if (!archived && this.projectCwd !== null && group.key === normalizePath(this.projectCwd)) {
@@ -616,8 +628,8 @@ class Navigation {
       heading.append(icon('chevron', closed ? '' : 'vcl-open'), icon('folder'), element('span', 'vcl-label', group.name));
       if (group.current) heading.append(element('span', 'vcl-current', '当前'));
       heading.append(element('span', 'vcl-group-count', String(group.total)));
-      if (!archived && closed) {
-        const kinds = new Set(group.threads.map((thread) => this.activity.indicator(thread)?.kind));
+      if (!archived && hiddenThreads.length) {
+        const kinds = new Set(hiddenThreads.map((thread) => this.activity.indicator(thread)?.kind));
         const labels = [];
         for (const [kind, label] of [['running', '项目中有聊天正在运行'], ['attention', '项目中有聊天需要查看']]) {
           if (!kinds.has(kind)) continue;
@@ -635,7 +647,7 @@ class Navigation {
       const children = element('div', 'vcl-threads'); children.id = `vcl-group-${index}`; children.hidden = closed;
       if (!closed) {
         if (!group.threads.length) children.append(element('div', 'vcl-empty-project', '暂无聊天'));
-        for (const thread of group.threads) {
+        for (const thread of shownThreads) {
           if (archived) {
             const threadRow = element('div', 'vcl-thread-row vcl-archived-row');
             const row = element('button', 'vcl-thread vcl-archived-thread'); row.type = 'button';
@@ -701,7 +713,22 @@ class Navigation {
         projectRow.append(pin);
       }
       if (!archived) projectRow.append(create);
-      section.append(projectRow, children); fragment.append(section);
+      section.append(projectRow, children);
+      if (!closed && !archived && !query && group.threads.length > DEFAULT_VISIBLE_THREADS) {
+        const label = limited ? `展开显示（还有 ${group.threads.length - DEFAULT_VISIBLE_THREADS} 条）` : '收起显示';
+        const more = element('button', 'vcl-show-more'); more.type = 'button';
+        more.dataset.vclKey = `show-more:${group.key}`; more.title = label;
+        more.setAttribute('aria-label', `${group.name}：${label}`);
+        more.setAttribute('aria-expanded', String(!limited)); more.setAttribute('aria-controls', children.id);
+        more.append(icon('chevron'), element('span', 'vcl-label', label));
+        more.addEventListener('click', () => {
+          this.dismissNativeMenu(); this.closeMenuAnchor();
+          if (this.expandedProjects.has(group.key)) this.expandedProjects.delete(group.key); else this.expandedProjects.add(group.key);
+          this.render();
+        });
+        section.append(more);
+      }
+      fragment.append(section);
       if (!archived && group.path) {
         heading.setAttribute('aria-haspopup', 'menu');
         projectRow.addEventListener('contextmenu', (event) => {
@@ -717,7 +744,10 @@ class Navigation {
       : archived ? this.mode.value === 'current' ? '当前项目暂无已归档聊天，可切换全部项目查看' : '暂无已归档聊天' : '暂无聊天'));
     this.list.replaceChildren(fragment); this.count.textContent = `${groups.length} 个项目 · ${visibleThreads} 个${archived ? '已归档' : ''}聊天`;
     this.list.scrollTop = scrollTop;
-    if (focused) [...this.list.querySelectorAll('[data-vcl-key]')].find((node) => node.dataset.vclKey === focused)?.focus({ preventScroll: true });
+    if (focused) {
+      const targets = [...this.list.querySelectorAll('[data-vcl-key]')];
+      (targets.find((node) => node.dataset.vclKey === focused) ?? targets.find((node) => node.dataset.vclKey === focusedProject))?.focus({ preventScroll: true });
+    }
   }
   activityDot({ kind, label }) {
     const dot = element('span', `vcl-activity ${kind === 'attention' ? 'vcl-attention' : 'vcl-running'}`);
