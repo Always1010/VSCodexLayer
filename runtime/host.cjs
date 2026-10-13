@@ -75,6 +75,34 @@ function parentId(thread) {
   return validId(parent) ? parent : null;
 }
 
+function agentSummary(thread) {
+  const meta = thread.source?.subAgent?.thread_spawn ?? {};
+  return { ...summary(thread), parentThreadId: parentId(thread),
+    nickname: typeof meta.agent_nickname === 'string' ? meta.agent_nickname.slice(0, 100) : null,
+    role: typeof meta.agent_role === 'string' ? meta.agent_role.slice(0, 100) : null };
+}
+function agentAction(item) {
+  const text = (value, limit) => typeof value === 'string' ? value.slice(0, limit) : null;
+  if (!validId(item?.id)) return null;
+  if (item.type === 'subAgentActivity' && validId(item.agentThreadId)
+    && ['started', 'interacted', 'completed', 'interrupted'].includes(item.kind)) {
+    return { id: item.id, tool: item.kind === 'started' ? 'spawnAgent' : 'activity', receiverThreadIds: [item.agentThreadId],
+      nickname: text(item.agentPath, 100), states: ['completed', 'interrupted'].includes(item.kind)
+        ? { [item.agentThreadId]: item.kind } : {}, prompt: null, model: null, reasoningEffort: null };
+  }
+  if (item.type !== 'collabAgentToolCall' || !['spawnAgent', 'sendInput', 'resumeAgent', 'wait', 'closeAgent'].includes(item.tool)) return null;
+  const ids = Array.isArray(item.receiverThreadIds) ? item.receiverThreadIds.filter(validId) : [];
+  const states = {};
+  for (const id of ids) {
+    const status = item.agentsStates?.[id]?.status;
+    if (['pendingInit', 'running', 'completed', 'interrupted', 'shutdown', 'errored', 'notFound'].includes(status)) states[id] = status;
+  }
+  return { id: item.id, tool: item.tool, receiverThreadIds: ids, states,
+    prompt: text(item.prompt, 800), model: text(item.model, 100), reasoningEffort: text(item.reasoningEffort, 30),
+    // A failed spawn does not establish a child relationship.
+    failed: item.status === 'failed' };
+}
+
 function workspaceSupport(vscode, provider, isWsl, platform) {
   const folders = vscode.workspace.workspaceFolders ?? [];
   const unsupported = (reason) => ({ supported: false, mode: 'unsupported', reason });
@@ -339,6 +367,22 @@ exports.createLayerHost = function createLayerHost({ vscode, provider, webview, 
       }
       return { thread: current, ancestors, complete: true };
     }
+    if (method === 'agent-page') {
+      if (params.cursor != null && (typeof params.cursor !== 'string' || params.cursor.length > 16384)) throw new Error('分页参数无效。');
+      if (params.archived !== undefined && typeof params.archived !== 'boolean') throw new Error('归档筛选参数无效。');
+      // Source filtering works on older servers too, without changing their
+      // experimental capability handshake or assuming ancestor filters exist.
+      const result = await requestBackend('thread/list', { limit: 200, cursor: params.cursor ?? null,
+        sourceKinds: ['subAgentThreadSpawn'], archived: params.archived === true, sortKey: 'created_at', useStateDbOnly: true });
+      if (!Array.isArray(result?.data)) throw new Error('官方子 Agent 列表格式发生变化。');
+      return { data: result.data.filter((thread) => validId(thread?.id)).map(agentSummary), nextCursor: result.nextCursor ?? null };
+    }
+    if (method === 'agent-history') {
+      const thread = await readThread(params.threadId, true);
+      if (!Array.isArray(thread.turns)) throw new Error('官方子 Agent 调用历史格式发生变化。');
+      return { thread: agentSummary(thread), turns: thread.turns.map((turn) => ({ id: turn.id,
+        actions: (Array.isArray(turn.items) ? turn.items : []).map(agentAction).filter(Boolean) })) };
+    }
     if (method === 'navigate') {
       if (typeof params.threadId !== 'string' || !/^[\w-]{1,200}$/.test(params.threadId)) throw new Error('聊天编号无效。');
       // Target the originating webview, rather than the provider's sidebar-only helper.
@@ -394,6 +438,20 @@ exports.createLayerHost = function createLayerHost({ vscode, provider, webview, 
   disposables.push(provider.codexMcpConnection.registerInternalNotificationHandler((notification) => {
     const { method, params = {} } = notification;
     const threadId = method === 'thread/started' ? params.thread?.id : params.threadId;
+    if (validId(threadId)) {
+      if (['item/started', 'item/completed'].includes(method) && validId(params.turnId)) {
+        const action = agentAction(params.item);
+        if (action) post({ type: EVENT, event: { type: 'agent-action', threadId, turnId: params.turnId, action } });
+      }
+      if (method === 'thread/started' && parentId(params.thread)) post({ type: EVENT,
+        event: { type: 'agent-discovered', thread: agentSummary(params.thread) } });
+      if (['turn/started', 'turn/completed'].includes(method)) {
+        const turnId = params.turn?.id ?? params.turnId;
+        if (validId(turnId)) post({ type: EVENT, event: { type: 'agent-state', threadId, turnId,
+          status: method === 'turn/started' ? 'running' : params.turn?.status === 'completed' ? 'completed'
+            : params.turn?.status === 'interrupted' ? 'interrupted' : params.turn?.status === 'failed' ? 'errored' : 'unknown' } });
+      }
+    }
     if (typeof threadId === 'string' && /^[\w-]{1,200}$/.test(threadId)) {
       if (method === 'turn/started') replies.delete(threadId);
       if (method === 'item/completed' && typeof params.turnId === 'string'

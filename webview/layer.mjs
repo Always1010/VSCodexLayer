@@ -2,6 +2,7 @@ import { LayerClient } from './client.mjs';
 import { groupThreads, normalizePath, projectName, routeThreadId, loadAllThreads, ThreadActivity, navigationEdits, overlayNavigationEdits } from './core.mjs';
 import { ReplyReader } from './reading.mjs';
 import { AgentNavigation } from './agent-navigation.mjs';
+import { AgentOverview } from './agent-overview.mjs';
 
 const SVG = 'http://www.w3.org/2000/svg';
 const icons = {
@@ -10,6 +11,8 @@ const icons = {
   folder: ['M3 7V5a2 2 0 0 1 2-2h5l2 3h7a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z'],
   chevron: ['m9 6 6 6-6 6'], search: ['m21 21-4.4-4.4', 'M19 11a8 8 0 1 1-16 0 8 8 0 0 1 16 0Z'],
   back: ['m12 5-7 7 7 7', 'M5 12h15'],
+  close: ['m6 6 12 12', 'm18 6-12 12'],
+  agents: ['M8 4H4v4h4Z', 'M20 4h-4v4h4Z', 'M14 16h-4v4h4Z', 'M6 8v4h12V8', 'M12 12v4'],
   plus: ['M12 5v14', 'M5 12h14'],
   pin: ['M16 3l5 5-4 1-4 4-1 4-5-5 4-1 4-4Z', 'm2 22 5-5'],
   more: ['M5 12h.01', 'M12 12h.01', 'M19 12h.01'],
@@ -131,6 +134,8 @@ class Navigation {
     this.agentNavigation = new AgentNavigation(this.client, this.bridge, { element, iconButton });
     this.agentNavigation.onError = (error) => this.showError(error);
     this.cleanups.push(() => this.agentNavigation.dispose());
+    this.agentOverview = new AgentOverview(this.client, this.bridge, this.agentNavigation, { element, iconButton, icon });
+    this.cleanups.push(() => this.agentOverview.dispose());
     this.bridge.setReasoningEnabled(true);
     this.cleanups.push(this.bridge.setReasoningReader((method, detail) =>
       this.client.request(method, detail).catch((error) => { this.showError(error); throw error; })));

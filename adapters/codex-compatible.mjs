@@ -255,6 +255,8 @@ export async function buildCompatiblePatchPlan(directory) {
     ['webview/bootstrap.js', 'webview/vscodex-layer/bootstrap.js'],
     ['webview/client.mjs', 'webview/vscodex-layer/client.mjs'],
     ['webview/agent-navigation.mjs', 'webview/vscodex-layer/agent-navigation.mjs'],
+    ['webview/agent-core.mjs', 'webview/vscodex-layer/agent-core.mjs'],
+    ['webview/agent-overview.mjs', 'webview/vscodex-layer/agent-overview.mjs'],
     ['webview/core.mjs', 'webview/vscodex-layer/core.mjs'],
     ['webview/reading.mjs', 'webview/vscodex-layer/reading.mjs'],
     ['webview/layer.mjs', 'webview/vscodex-layer/layer.mjs'],

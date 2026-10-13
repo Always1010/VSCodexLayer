@@ -11,7 +11,8 @@ const reasoningOnly = process.argv.length === 3 && process.argv[2] === '--reason
 const archiveOnly = process.argv.length === 3 && process.argv[2] === '--archive';
 const listOnly = process.argv.length === 3 && process.argv[2] === '--list';
 const activityOnly = process.argv.length === 3 && process.argv[2] === '--activity';
-if (process.argv.length > 2 && !readingOnly && !reasoningOnly && !archiveOnly && !listOnly && !activityOnly) throw new Error('用法：node tools/check-ui.mjs [--reading|--reasoning|--archive|--list|--activity]');
+const agentsOnly = process.argv.length === 3 && process.argv[2] === '--agents';
+if (process.argv.length > 2 && !readingOnly && !reasoningOnly && !archiveOnly && !listOnly && !activityOnly && !agentsOnly) throw new Error('用法：node tools/check-ui.mjs [--reading|--reasoning|--archive|--list|--activity|--agents]');
 const output = path.join(root, '.scratch', 'ui');
 await fs.mkdir(output, { recursive: true });
 const executable = [
@@ -36,6 +37,7 @@ const page = `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8">
 </style>
 <script>
 window.mockThreads=${JSON.stringify(threads)};window.mockState={revision:0,mode:'all',width:250,groups:[],collapsed:null,disabled:false,pinnedProjects:[],unread:[],unreadTurns:{}};window.mockRegistry={revision:0,projects:[]};window.mockPickedFolder=null;window.mockCannotOpen=false;window.mockSaveFailure=false;window.mockCopiedPath=null;window.mockRequests=[];window.mockRoute='/';window.mockDrafts={'/':'未发送的草稿','/local/thread-8':'历史聊天自己的草稿'};window.mockSubmissions=0;window.mockDelayIndex=false;window.mockUnindexed=[];window.mockUnavailable=new Set();let acquired=false;
+window.mockAgents=[];
 window.mockDraftKey=path=>{const url=new URL(path,location.origin);return __vscodexLayerBridge.projectRoute(url.pathname,url.pathname,url.search)?.vclDraftKey??path};
 window.mockNavigate=path=>{mockRoute=path;__vscodexLayerBridge.observeRoute(path);document.querySelector('#native-title').textContent=path==='/'?'':mockThreads.find(t=>'/local/'+t.id===path)?.title??'新聊天';const previous=document.querySelector('#native-composer');const next=previous.cloneNode();next.value=mockDrafts[mockDraftKey(path)]??'';next.oninput=()=>{mockDrafts[mockDraftKey(mockRoute)]=next.value};previous.replaceWith(next);document.querySelector('[data-vcl-home-history]').hidden=path!=='/'};
 window.mockNewChat=()=>{if(!__vscodexLayerBridge.resumeDraft({selectChat:true}))mockNavigate('/')};
@@ -44,9 +46,11 @@ window.acquireVsCodeApi=()=>{if(acquired)throw Error('API acquired twice');acqui
 if(message.type!=='vscodex-layer/request')return;mockRequests.push(message);let result,error;
 if(message.method==='init')result={supported:true,mode:'local',registry:structuredClone(mockRegistry),folders:[{name:'VSCodexLayer',path:'D:/WRK/VSCodexLayer'}],state:mockState,version:'mock'};
 else if(message.method==='list'){const first=message.params.cursor==null;const list=message.params.archived?mockArchivedThreads:mockThreads;result={data:structuredClone(list.slice(first?0:50,first?50:undefined)),nextCursor:first&&list.length>50?'page-2':null};if(message.params.archived&&mockArchiveListFailure)error='归档列表读取失败'}
-else if(message.method==='ancestry')result={thread:structuredClone(mockThreads.find(t=>t.id===message.params.threadId)??{id:message.params.threadId,title:'子聊天'}),ancestors:[],complete:true};
+else if(message.method==='ancestry'){const id=message.params.threadId;result={thread:structuredClone(mockThreads.find(t=>t.id===id)??mockAgents?.find(t=>t.id===id)??{id,title:'子聊天'}),ancestors:id==='agent-nested'?[mockAgents[0],mockThreads.find(t=>t.id==='thread-0')]:id.startsWith('agent-')?[mockThreads.find(t=>t.id==='thread-0')]:[],complete:true}}
+else if(message.method==='agent-page'){if(window.mockAgentsError)error='子 Agent 列表读取失败';else{const all=window.mockAgents??[];result={data:message.params.archived?[]:structuredClone(all.slice(message.params.cursor?1:0,message.params.cursor?undefined:1)),nextCursor:!message.params.archived&&!message.params.cursor&&all.length>1?'agents-page2':null}}}
+else if(message.method==='agent-history')result={thread:{id:message.params.threadId},turns:structuredClone(window.mockAgentHistory?.[message.params.threadId]??[])};
 else if(message.method==='save-state'){mockState=mockApplyOperations(mockState,message.params.operations);mockState.revision++;result={saved:true,state:structuredClone(mockState)};window.postMessage({type:'vscodex-layer/event',event:{type:'navigation-state-changed',state:structuredClone(mockState)}},location.origin)}
-else if(message.method==='navigate'){mockNavigate('/local/'+message.params.threadId);result={threadId:message.params.threadId}}
+else if(message.method==='navigate'){mockNavigate(message.params.path??'/local/'+message.params.threadId);result={threadId:message.params.threadId}}
 else if(message.method==='validate-project'){if(mockUnavailable.has(message.params.cwd))error='项目目录不存在或无法访问';else result={cwd:message.params.cwd}}
 else if(message.method==='new-project-chat'){if(mockCannotOpen||mockUnavailable.has(message.params.cwd))error='项目目录不存在或无法访问';else{const path=message.params.path+'?vclProjectCwd='+encodeURIComponent(message.params.cwd);mockNavigate(path);result={path,cwd:message.params.cwd}}}
 else if(message.method==='new-chat'){mockNavigate(message.params.path);result={path:message.params.path}}
@@ -123,7 +127,7 @@ __vscodexLayerBridge.subscribeThreadMenu(()=>{
 });
 </script>
 </body></html>`;
-const allowed = new Set(['bootstrap.js', 'client.mjs', 'core.mjs', 'reading.mjs', 'layer.mjs', 'layer.css']);
+const allowed = new Set(['bootstrap.js', 'client.mjs', 'core.mjs', 'reading.mjs', 'layer.mjs', 'layer.css', 'agent-navigation.mjs', 'agent-core.mjs', 'agent-overview.mjs']);
 const server = http.createServer(async (request, response) => {
   const url = new URL(request.url, 'http://localhost');
   if (url.pathname === '/') { response.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }); response.end(page); return; }
@@ -195,7 +199,50 @@ try {
   await send('Emulation.setDeviceMetricsOverride', { width: 1100, height: 800, deviceScaleFactor: 1, mobile: false }, sessionId);
   await send('Page.navigate', { url: address }, sessionId);
   await waitFor(`document.querySelector('.vcl-count')?.textContent.includes('63 个聊天')`);
-  if (activityOnly) {
+  if (agentsOnly) {
+    await evaluate(`window.mockAgents=[{id:'agent-history',parentThreadId:'thread-0',title:'History',status:'active'},
+      {id:'agent-status',parentThreadId:'thread-0',title:'Status',status:'idle'},
+      {id:'agent-nested',parentThreadId:'agent-history',title:'Review',status:'notLoaded'}];
+      window.mockAgentHistory={'thread-0':[{id:'old',actions:[{id:'status',tool:'spawnAgent',receiverThreadIds:['agent-status'],states:{'agent-status':'completed'}}]},
+      {id:'current',actions:[{id:'history',tool:'spawnAgent',receiverThreadIds:['agent-history'],states:{'agent-history':'running'},prompt:'实现历史遍历',model:'model',reasoningEffort:'high'}]}],
+      'agent-history':[{id:'nested',actions:[{id:'review',tool:'spawnAgent',receiverThreadIds:['agent-nested'],states:{},prompt:'审查边界'}]}]};
+      mockNavigate('/local/thread-0?view=review')`);
+    await waitFor(`document.querySelector('.vcl-agent-trigger')?.textContent.includes('3')`);
+    await evaluate(`document.querySelector('.vcl-agent-trigger').click()`);
+    await waitFor(`document.querySelectorAll('.vcl-agent-row').length===2&&!document.querySelector('.vcl-agent-list[aria-busy="true"]')`);
+    await assertBrowser(`document.querySelector('.vcl-agent-counts').textContent.includes('2 个')`, '本轮未按调用及后代筛选');
+    await evaluate(`document.querySelector('[data-agent-key="all"]').click()`);
+    await waitFor(`document.querySelectorAll('.vcl-agent-row').length===3`);
+    await assertBrowser(`document.querySelector('[data-agent-key="agent-status"]').textContent.includes('已完成')
+      &&document.querySelector('[data-agent-key="agent-nested"]').textContent.includes('状态未知')`, '空闲或未加载被误标完成');
+    await send('Emulation.setDeviceMetricsOverride', { width: 1400, height: 800, deviceScaleFactor: 1, mobile: false }, sessionId);
+    await evaluate(`document.querySelector('[data-agent-key="pin"]').click()`);
+    await waitFor(`document.body.classList.contains('vcl-agents-pinned')`);
+    await assertBrowser(`document.getElementById('root').getBoundingClientRect().right<=document.getElementById('vcl-agent-panel').getBoundingClientRect().left`, '固定侧栏遮挡正文');
+    await evaluate(`window.postMessage({type:'vscodex-layer/event',event:{type:'agent-state',threadId:'agent-history',turnId:'finished',status:'completed'}},location.origin)`);
+    await waitFor(`document.querySelector('[data-agent-key="agent-history"]').textContent.includes('已完成')`);
+    await assertBrowser(`mockRequests.filter(r=>r.method==='agent-page').length===3`, '状态变化重复读取分页');
+    await send('Emulation.setDeviceMetricsOverride', { width: 700, height: 800, deviceScaleFactor: 1, mobile: false }, sessionId);
+    await waitFor(`!document.body.classList.contains('vcl-agents-pinned')`);
+    await assertBrowser(`document.getElementById('vcl-agent-panel').getBoundingClientRect().left>=document.getElementById('vcl-navigation').getBoundingClientRect().right`, '窄窗口浮层超出聊天范围');
+    await evaluate(`document.querySelector('[data-agent-key="agent-nested"]').click()`);
+    await waitFor(`mockRoute==='/local/agent-nested'&&!document.getElementById('vcl-agent-return').hidden`);
+    await assertBrowser(`document.getElementById('root').getBoundingClientRect().top>=document.getElementById('vcl-agent-return').getBoundingClientRect().bottom`, '返回导航遮挡聊天标题');
+    await assertBrowser(`document.querySelector('.vcl-agent-root')?.textContent==='主聊天'`, '嵌套调用缺少主聊天返回入口');
+    await evaluate(`document.querySelector('.vcl-agent-root').click()`);
+    await waitFor(`mockRoute==='/local/thread-0?view=review'`);
+    await evaluate(`if(document.getElementById('vcl-agent-panel').hidden)document.querySelector('.vcl-agent-trigger').click();window.mockAgentsError=true;document.querySelector('[data-agent-key="refresh"]').click()`);
+    await waitFor(`document.querySelector('.vcl-agent-error')?.textContent.includes('读取失败')`);
+    await assertBrowser(`document.querySelector('.vcl-agent-counts').textContent.includes('已发现')&&document.querySelectorAll('.vcl-agent-row').length>0`, '失败丢弃已有子 Agent 或误报完整数量');
+    await evaluate(`window.mockAgentsError=false;document.querySelector('[data-agent-key="retry"]').click()`);
+    await waitFor(`!document.querySelector('.vcl-agent-error')&&!document.querySelector('.vcl-agent-list[aria-busy="true"]')`);
+    await evaluate(`document.documentElement.dataset.theme='dark'`); await screenshot('agents-dark.png');
+    await evaluate(`document.querySelector('[data-agent-key="close"]').click()`);
+    await assertBrowser(`document.getElementById('vcl-agent-panel').hidden&&document.activeElement.classList.contains('vcl-agent-trigger')`, '关闭未返回入口焦点');
+    await evaluate(`mockNavigate('/local/thread-8')`);
+    await waitFor(`document.getElementById('vcl-agent-tools').hidden`);
+    console.log('子 Agent 专项无头检查通过：完整分页、数量与本轮树、实时状态、固定侧栏与窄窗口浮层、原生路由与嵌套返回、查询参数恢复、失败保留与重试、主题及关闭焦点。');
+  } else if (activityOnly) {
     await evaluate(`window.projectHeading=()=>document.querySelector('[data-vcl-key="project:d:/wrk/vscodexlayer"]');
       window.emitActivity=(threadId,phase,status='idle',activeFlags=[])=>window.postMessage({type:'vscodex-layer/event',event:{type:'thread-activity',threadId,phase,status,activeFlags}},location.origin);
       window.initialListCalls=mockRequests.filter(request=>request.method==='list').length;projectHeading().click()`);

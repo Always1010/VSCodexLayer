@@ -24,6 +24,7 @@ export class AgentNavigation {
     if (route === this.route) return;
     this.route = route; this.threadId = routeThreadId(route);
     const sequence = ++this.sequence;
+    this.onRouteChange?.(this.threadId);
     this.clear();
     if (!this.threadId) return;
     try {
