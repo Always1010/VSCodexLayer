@@ -44,6 +44,7 @@ window.acquireVsCodeApi=()=>{if(acquired)throw Error('API acquired twice');acqui
 if(message.type!=='vscodex-layer/request')return;mockRequests.push(message);let result,error;
 if(message.method==='init')result={supported:true,mode:'local',registry:structuredClone(mockRegistry),folders:[{name:'VSCodexLayer',path:'D:/WRK/VSCodexLayer'}],state:mockState,version:'mock'};
 else if(message.method==='list'){const first=message.params.cursor==null;const list=message.params.archived?mockArchivedThreads:mockThreads;result={data:structuredClone(list.slice(first?0:50,first?50:undefined)),nextCursor:first&&list.length>50?'page-2':null};if(message.params.archived&&mockArchiveListFailure)error='归档列表读取失败'}
+else if(message.method==='ancestry')result={thread:structuredClone(mockThreads.find(t=>t.id===message.params.threadId)??{id:message.params.threadId,title:'子聊天'}),ancestors:[],complete:true};
 else if(message.method==='save-state'){mockState=mockApplyOperations(mockState,message.params.operations);mockState.revision++;result={saved:true,state:structuredClone(mockState)};window.postMessage({type:'vscodex-layer/event',event:{type:'navigation-state-changed',state:structuredClone(mockState)}},location.origin)}
 else if(message.method==='navigate'){mockNavigate('/local/'+message.params.threadId);result={threadId:message.params.threadId}}
 else if(message.method==='validate-project'){if(mockUnavailable.has(message.params.cwd))error='项目目录不存在或无法访问';else result={cwd:message.params.cwd}}

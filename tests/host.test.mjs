@@ -35,6 +35,38 @@ function fixture(platform = process.platform, globalState) {
 }
 const flush = () => new Promise((resolve) => setImmediate(resolve));
 
+test('子聊天沿真实父关系返回，排除分叉关系、循环和不匹配响应', async (t) => {
+  const f = fixture(); t.after(() => f.host.dispose());
+  const reply = async (thread, error) => {
+    await flush(); const call = f.requests.at(-1);
+    assert.equal(call[2], 'thread/read'); assert.equal(call[3].includeTurns, false);
+    f.callbacks().onResult({ id: call[1], ...(error ? { error: { message: error } } : { result: { thread } }) });
+    await flush();
+  };
+  const pending = f.request('ancestry', { threadId: 'child' });
+  await reply({ id: 'child', source: { subAgent: { thread_spawn: { parent_thread_id: 'parent' } } }, turns: ['secret'] });
+  assert.equal(f.requests.at(-1)[3].threadId, 'parent');
+  await reply({ id: 'parent', parentThreadId: 'root' });
+  await reply({ id: 'root', forkedFromId: 'unrelated', name: '主聊天' });
+  const result = (await pending).result;
+  assert.deepEqual(result.ancestors.map((thread) => thread.id), ['parent', 'root']);
+  assert.equal(result.complete, true); assert.equal(JSON.stringify(result).includes('secret'), false);
+  const missing = f.request('ancestry', { threadId: 'child' });
+  await reply({ id: 'child', parentThreadId: 'deleted' }); await reply(null, 'not found');
+  assert.equal((await missing).result.complete, false);
+  const cycle = f.request('ancestry', { threadId: 'child' });
+  await reply({ id: 'child', parentThreadId: 'parent' }); await reply({ id: 'parent', parentThreadId: 'child' });
+  assert.match((await cycle).error, /父子关系异常/);
+  const mismatch = f.request('ancestry', { threadId: 'child' }); await reply({ id: 'other' });
+  assert.match((await mismatch).error, /格式发生变化/);
+  const count = f.requests.length;
+  assert.match((await f.request('ancestry', { threadId: '../invalid' })).error, /编号无效/);
+  assert.equal(f.requests.length, count);
+  await f.request('navigate', { threadId: 'root', path: '/local/root?view=review' });
+  assert.ok(f.messages.some((message) => message.path === '/local/root?view=review'));
+  assert.match((await f.request('navigate', { threadId: 'root', path: '/local/other' })).error, /返回路径无效/);
+});
+
 test('多面板按操作保存偏好，已读绑定轮次，重复结束不复活且写入失败可重试', async (t) => {
   const values = new Map([['vscodexLayer.navigationState.v1', { pinnedProjects: [{ path: '/legacy', name: '旧置顶' }], unread: ['legacy'] }]]);
   let fail = false;

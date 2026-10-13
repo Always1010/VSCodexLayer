@@ -1,6 +1,7 @@
 import { LayerClient } from './client.mjs';
 import { groupThreads, normalizePath, projectName, routeThreadId, loadAllThreads, ThreadActivity, navigationEdits, overlayNavigationEdits } from './core.mjs';
 import { ReplyReader } from './reading.mjs';
+import { AgentNavigation } from './agent-navigation.mjs';
 
 const SVG = 'http://www.w3.org/2000/svg';
 const icons = {
@@ -127,6 +128,9 @@ class Navigation {
     });
     this.rail.append(header, controls, this.status, this.list, footer, this.resizeHandle);
     document.body.append(this.rail); document.body.classList.add('vcl-enabled');
+    this.agentNavigation = new AgentNavigation(this.client, this.bridge, { element, iconButton });
+    this.agentNavigation.onError = (error) => this.showError(error);
+    this.cleanups.push(() => this.agentNavigation.dispose());
     this.bridge.setReasoningEnabled(true);
     this.cleanups.push(this.bridge.setReasoningReader((method, detail) =>
       this.client.request(method, detail).catch((error) => { this.showError(error); throw error; })));
