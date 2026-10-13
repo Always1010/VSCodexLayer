@@ -12,7 +12,8 @@ const archiveOnly = process.argv.length === 3 && process.argv[2] === '--archive'
 const listOnly = process.argv.length === 3 && process.argv[2] === '--list';
 const activityOnly = process.argv.length === 3 && process.argv[2] === '--activity';
 const agentsOnly = process.argv.length === 3 && process.argv[2] === '--agents';
-if (process.argv.length > 2 && !readingOnly && !reasoningOnly && !archiveOnly && !listOnly && !activityOnly && !agentsOnly) throw new Error('用法：node tools/check-ui.mjs [--reading|--reasoning|--archive|--list|--activity|--agents]');
+const moreOnly = process.argv.length === 3 && process.argv[2] === '--more';
+if (process.argv.length > 2 && !readingOnly && !reasoningOnly && !archiveOnly && !listOnly && !activityOnly && !agentsOnly && !moreOnly) throw new Error('用法：node tools/check-ui.mjs [--reading|--reasoning|--archive|--list|--activity|--agents|--more]');
 const output = path.join(root, '.scratch', 'ui');
 await fs.mkdir(output, { recursive: true });
 const executable = [
@@ -199,7 +200,100 @@ try {
   await send('Emulation.setDeviceMetricsOverride', { width: 1100, height: 800, deviceScaleFactor: 1, mobile: false }, sessionId);
   await send('Page.navigate', { url: address }, sessionId);
   await waitFor(`document.querySelector('.vcl-count')?.textContent.includes('63 个聊天')`);
-  if (agentsOnly) {
+  if (!moreOnly) {
+    // Existing scenarios exercise the complete list; --more covers the default five-row view.
+    await evaluate(`window.expandAllProjects=()=>{
+      for(const key of [...document.querySelectorAll('.vcl-show-more[aria-expanded="false"]')].map(node=>node.dataset.vclKey)){
+        [...document.querySelectorAll('.vcl-show-more')].find(node=>node.dataset.vclKey===key)?.click()
+      }
+    };expandAllProjects()`);
+  }
+  if (moreOnly) {
+    await evaluate(`window.currentKey='d:/wrk/vscodexlayer';window.otherKey='d:/wrk/project';
+      window.projectView=key=>document.querySelector('[data-vcl-key="project:'+key+'"]').closest('.vcl-project');
+      window.headingView=key=>projectView(key).querySelector('.vcl-project-heading');
+      window.moreView=key=>projectView(key).querySelector('.vcl-show-more');
+      window.chatKeys=key=>[...projectView(key).querySelectorAll('.vcl-thread')].map(node=>node.dataset.vclKey);
+      window.searchFor=value=>{const input=document.querySelector('.vcl-input');input.value=value;input.dispatchEvent(new Event('input'))};
+      window.emitActivity=(threadId,phase,status='idle')=>window.postMessage({type:'vscodex-layer/event',event:{type:'thread-activity',threadId,phase,status,activeFlags:[]}},location.origin)`);
+    await assertBrowser(`document.querySelectorAll('.vcl-thread').length===15
+      &&JSON.stringify(chatKeys(currentKey))===JSON.stringify(['thread:thread-7','thread:thread-6','thread:thread-5','thread:thread-4','thread:thread-3'])
+      &&headingView(currentKey).querySelector('.vcl-group-count').textContent==='8'
+      &&moreView(currentKey).textContent.includes('还有 3 条')`, '默认未按创建时间显示前五条或总数／剩余数错误');
+    await assertBrowser(`headingView(currentKey).getAttribute('aria-expanded')==='true'
+      &&headingView(currentKey).querySelector('.vcl-running')&&!document.querySelector('[data-vcl-key="thread:thread-0"]')`, '隐藏聊天的初始运行状态没有汇总到目录');
+    await evaluate(`emitActivity('thread-1','completed')`);
+    await waitFor(`headingView(currentKey).querySelector('.vcl-attention')`);
+    await assertBrowser(`headingView(currentKey).querySelector('.vcl-running')&&chatKeys(currentKey).length===5`, '隐藏聊天完成后丢失运行圈或自动展开');
+    await screenshot('navigation-more-light.png');
+    await evaluate(`moreView(currentKey).focus()`);
+    await send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, text: '\r' }, sessionId);
+    await send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 }, sessionId);
+    await assertBrowser(`chatKeys(currentKey).length===8&&chatKeys(otherKey).length===5
+      &&moreView(currentKey).getAttribute('aria-expanded')==='true'
+      &&document.activeElement===moreView(currentKey)&&!headingView(currentKey).querySelector('.vcl-activity')
+      &&document.querySelector('[data-vcl-key="thread:thread-1"] .vcl-attention')`, '键盘展开未独立生效、丢失焦点或错误清除未读');
+    await evaluate(`headingView(currentKey).click();headingView(currentKey).click();document.querySelector('[aria-label="刷新聊天列表"]').click()`);
+    await waitFor(`!document.querySelector('[aria-label="刷新聊天列表"]').disabled`);
+    await assertBrowser(`chatKeys(currentKey).length===8&&chatKeys(otherKey).length===5`, '折叠目录或刷新重置了各项目的显示选择');
+    await evaluate(`moreView(currentKey).focus();moreView(currentKey).click();
+      moreView(currentKey).dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowUp',bubbles:true}))`);
+    await assertBrowser(`chatKeys(currentKey).length===5&&document.activeElement.dataset.vclKey==='thread:thread-3'`, '收起或从展开按钮向上导航失败');
+    await evaluate(`document.activeElement.dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowDown',bubbles:true}));searchFor('VSCodexLayer')`);
+    await assertBrowser(`chatKeys(currentKey).length===8&&!moreView(currentKey)
+      &&!headingView(currentKey).querySelector('.vcl-activity')`, '项目搜索仍截断匹配内容或重复汇总可见状态');
+    await evaluate(`searchFor('')`);
+    await assertBrowser(`chatKeys(currentKey).length===5&&moreView(currentKey).getAttribute('aria-expanded')==='false'
+      &&headingView(currentKey).querySelector('.vcl-attention')`, '清空搜索没有恢复前五条或误清除隐藏未读');
+    await evaluate(`searchFor('设计项目聊天导航')`);
+    await assertBrowser(`JSON.stringify(chatKeys(currentKey))===JSON.stringify(['thread:thread-0'])&&!moreView(currentKey)`, '搜索无法找到第五条之后的聊天');
+    await evaluate(`searchFor('');mockNavigate('/local/thread-0')`);
+    await waitFor(`document.querySelector('[data-vcl-key="thread:thread-0"]')?.getAttribute('aria-current')==='page'`);
+    await assertBrowser(`chatKeys(currentKey).length===8&&chatKeys(currentKey).at(-1)==='thread:thread-0'`, '切入隐藏聊天没有展开定位或改变了创建时间排序');
+    await evaluate(`moreView(currentKey).click();document.querySelector('[aria-label="刷新聊天列表"]').click()`);
+    await waitFor(`!document.querySelector('[aria-label="刷新聊天列表"]').disabled`);
+    await assertBrowser(`chatKeys(currentKey).length===5`, '主动收起后刷新因当前聊天被隐藏而再次强制展开');
+    await evaluate(`emitActivity('thread-0','completed')`);
+    await waitFor(`headingView(currentKey).querySelector('.vcl-attention')&&!headingView(currentKey).querySelector('.vcl-running')`);
+    await evaluate(`moreView(currentKey).click();document.querySelector('[data-vcl-key="thread:thread-1"]').click()`);
+    await waitFor(`mockRoute==='/local/thread-1'`);
+    await assertBrowser(`document.querySelector('[data-vcl-key="thread:thread-0"] .vcl-attention')
+      &&!document.querySelector('[data-vcl-key="thread:thread-1"] .vcl-attention')`, '查看一个隐藏完成聊天错误清除其他聊天的未读');
+    await evaluate(`moreView(currentKey).click();document.documentElement.dataset.theme='dark'`);
+    await assertBrowser(`moreView(currentKey).getBoundingClientRect().height===22`, '展开按钮没有沿用紧凑行高');
+    await screenshot('navigation-more-dark.png');
+    await evaluate(`mockNavigate('/');mockRegistry={revision:mockRegistry.revision+1,projects:[{path:'D:/Empty'}]};
+      window.postMessage({type:'vscodex-layer/event',event:{type:'projects-changed',...mockRegistry}},location.origin);
+      mockThreads=[...Array.from({length:5},(_,i)=>({id:'five-'+i,title:'五条 '+i,cwd:'D:/Five',createdAt:100+i,status:'idle'})),
+        ...Array.from({length:6},(_,i)=>({id:'six-'+i,title:'六条 '+i,cwd:'D:/Six',createdAt:200+i,status:'idle'}))];
+      document.querySelector('[aria-label="刷新聊天列表"]').click()`);
+    await waitFor(`document.querySelector('.vcl-count').textContent.includes('11 个聊天')&&!document.querySelector('.vcl-loading')`);
+    await assertBrowser(`projectView('d:/empty').querySelector('.vcl-empty-project')&&!moreView('d:/empty')
+      &&chatKeys('d:/five').length===5&&!moreView('d:/five')
+      &&chatKeys('d:/six').length===5&&moreView('d:/six').textContent.includes('还有 1 条')`, '零条、五条或六条边界错误');
+    await evaluate(`moreView('d:/six').click();moreView('d:/six').focus();mockThreads=mockThreads.filter(thread=>thread.id!=='six-5');
+      document.querySelector('[aria-label="刷新聊天列表"]').click()`);
+    await waitFor(`document.querySelector('.vcl-count').textContent.includes('10 个聊天')&&!document.querySelector('.vcl-loading')`);
+    await assertBrowser(`chatKeys('d:/six').length===5&&!moreView('d:/six')&&document.activeElement===headingView('d:/six')`, '减少到五条后按钮没有消失或焦点落到正文');
+    await evaluate(`const thread={id:'six-new',title:'新聊天',cwd:'D:/Six',createdAt:4000,status:'idle'};mockThreads.push(thread);
+      window.postMessage({type:'vscodex-layer/event',event:{type:'threads-changed',method:'thread/started',threadId:thread.id,thread}},location.origin)`);
+    await waitFor(`moreView('d:/six')?.textContent.includes('收起显示')&&chatKeys('d:/six')[0]==='thread:six-new'`);
+    await assertBrowser(`chatKeys('d:/six').length===6`, '新聊天入列未保持已展开选择或未出现在顶部');
+    await evaluate(`moreView('d:/six').click()`);
+    await assertBrowser(`chatKeys('d:/six').length===5&&moreView('d:/six').textContent.includes('还有 1 条')`, '新增后收起的剩余数错误');
+    await evaluate(`moreView('d:/six').click();document.querySelector('[aria-label="返回原版界面"]').click()`);
+    await waitFor(`document.getElementById('vcl-launcher')`);
+    await evaluate(`document.getElementById('vcl-launcher').click()`);
+    await waitFor(`document.querySelector('.vcl-count').textContent.includes('11 个聊天')`);
+    await assertBrowser(`chatKeys('d:/six').length===5&&moreView('d:/six').getAttribute('aria-expanded')==='false'`, '重新打开面板没有恢复默认五条');
+    await evaluate(`document.getElementById('vcl-archive').click()`);
+    await waitFor(`document.querySelector('.vcl-count').textContent.includes('61 个已归档聊天')&&!document.querySelector('.vcl-loading')`);
+    await assertBrowser(`document.querySelectorAll('.vcl-archived-thread').length===61&&!document.querySelector('.vcl-show-more')`, '普通列表限制改变了归档显示');
+    await evaluate(`document.getElementById('vcl-archive-back').click();const separator=document.querySelector('[role=separator]');
+      for(let i=0;i<7;i++)separator.dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowLeft',bubbles:true}))`);
+    await assertBrowser(`moreView('d:/six').getBoundingClientRect().right<=document.getElementById('vcl-navigation').getBoundingClientRect().right`, '窄导航下展开按钮溢出');
+    console.log('五条聊天专项无头检查通过：默认排序与完整计数、隐藏状态汇总、键盘展开与焦点、项目独立选择、目录折叠与刷新、搜索、隐藏当前聊天定位、已读隔离、零／五／六条边界、增删更新、重开重置、归档隔离和窄导航布局。');
+  } else if (agentsOnly) {
     await evaluate(`window.mockAgents=[{id:'agent-history',parentThreadId:'thread-0',title:'History',status:'active'},
       {id:'agent-status',parentThreadId:'thread-0',title:'Status',status:'idle'},
       {id:'agent-nested',parentThreadId:'agent-history',title:'Review',status:'notLoaded'}];
@@ -565,7 +659,7 @@ try {
   await evaluate(`mockNewChat()`);
   await waitFor(`mockRoute==='/'`);
   await assertBrowser(`document.getElementById('native-composer').value==='' && mockSubmissions===1 && mockThreads.length===64`, '发送后草稿复活或聊天重复创建');
-  await evaluate(`document.getElementById('vcl-mode').value='all';document.getElementById('vcl-mode').dispatchEvent(new Event('change'))`);
+  await evaluate(`document.getElementById('vcl-mode').value='all';document.getElementById('vcl-mode').dispatchEvent(new Event('change'));expandAllProjects()`);
   await assertBrowser(`document.querySelectorAll('.vcl-new-chat').length===3 && document.querySelectorAll('.vcl-project-heading .vcl-new-chat').length===0`, '项目新建按钮缺失或嵌入折叠按钮');
   await evaluate(`document.querySelector('[data-vcl-key="project:d:/other/project"]').click();document.querySelector('[data-vcl-key="new:d:/other/project"]').click()`);
   await waitFor(`new URL(mockRoute,location.origin).searchParams.get('vclProjectCwd')==='D:/Other/Project' && !document.querySelector('.vcl-new-chat').disabled`);
@@ -611,6 +705,7 @@ try {
   await evaluate(`document.getElementById('vcl-launcher').click()`);
   await waitFor(`document.querySelector('[data-vcl-key="pin:d:/other/project"]')?.getAttribute('aria-pressed')==='true'`);
   await waitFor(`!document.querySelector('[aria-label="刷新聊天列表"]').disabled`);
+  await evaluate(`expandAllProjects()`);
   await evaluate(`mockThreads=mockThreads.filter(t=>t.cwd!=='D:/Other/Project');document.querySelector('[aria-label="刷新聊天列表"]').click()`);
   await waitFor(`document.querySelector('[data-vcl-key="project:d:/other/project"] .vcl-group-count')?.textContent==='0'`);
   await assertBrowser(`document.querySelector('[data-vcl-key="project:d:/other/project"]') && document.querySelector('[data-vcl-key="new:d:/other/project"]') && document.querySelector('[data-vcl-key="project:d:/other/project"] .vcl-group-count').textContent==='0'`, '置顶空项目丢失');

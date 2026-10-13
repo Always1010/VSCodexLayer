@@ -174,6 +174,10 @@ body.vcl-agents-pinned > #root { right: 390px !important; }
 #vcl-navigation .vcl-thread-row .vcl-thread { flex: 1; min-width: 0; width: auto; background: transparent; }
 #vcl-navigation .vcl-chat-more { flex: 0 0 22px; width: 22px; height: 22px; padding: 4px; opacity: 0; }
 #vcl-navigation .vcl-chat-more .vcl-icon { width: 14px; height: 14px; flex-basis: 14px; }
+#vcl-navigation .vcl-show-more { display: flex; align-items: center; gap: 7px; width: calc(100% - 28px); min-height: 22px; margin: 0 0 4px 28px; padding: 0 5px 0 8px; border: 0; border-radius: 3px; background: transparent; color: var(--vcl-muted); font-size: 11px; line-height: 18px; text-align: left; }
+#vcl-navigation .vcl-show-more:hover { background: var(--vcl-hover); color: var(--vcl-fg); }
+#vcl-navigation .vcl-show-more .vcl-icon { width: 12px; height: 12px; flex-basis: 12px; transform: rotate(90deg); }
+#vcl-navigation .vcl-show-more[aria-expanded="true"] .vcl-icon { transform: rotate(-90deg); }
 #vcl-navigation .vcl-thread-row:hover .vcl-chat-more,
 #vcl-navigation .vcl-thread-row:focus-within .vcl-chat-more,
 #vcl-navigation .vcl-menu-open .vcl-chat-more { opacity: 1; }
