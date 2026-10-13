@@ -12,6 +12,7 @@ const icons = {
   plus: ['M12 5v14', 'M5 12h14'],
   pin: ['M16 3l5 5-4 1-4 4-1 4-5-5 4-1 4-4Z', 'm2 22 5-5'],
   more: ['M5 12h.01', 'M12 12h.01', 'M19 12h.01'],
+  chat: ['M5 4h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H9l-6 4V6a2 2 0 0 1 2-2Z'],
   folderPlus: ['M3 7V5a2 2 0 0 1 2-2h5l2 3h7a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z', 'M12 10v8', 'M8 14h8'],
   archive: ['M3 3h18v4H3Z', 'M5 7v14h14V7', 'M10 11h4'],
   restore: ['M3 10h5V5', 'M3 10a9 9 0 1 1 1 8', 'M12 7v5l3 2'],
@@ -643,7 +644,7 @@ class Navigation {
           row.type = 'button'; row.dataset.vclKey = `thread:${thread.id}`;
           row.title = `${thread.title}\n${thread.cwd || '未分类'}`;
           if (this.active === thread.id) row.setAttribute('aria-current', 'page');
-          row.append(element('span', 'vcl-label', thread.title));
+          row.append(icon('chat', 'vcl-chat-icon'), element('span', 'vcl-label', thread.title));
           const indicator = this.activity.indicator(thread);
           if (indicator) {
             row.append(this.activityDot(indicator)); row.title += `\n${indicator.label}`;
@@ -702,7 +703,7 @@ class Navigation {
     if (focused) [...this.list.querySelectorAll('[data-vcl-key]')].find((node) => node.dataset.vclKey === focused)?.focus({ preventScroll: true });
   }
   activityDot({ kind, label }) {
-    const dot = element('span', `vcl-activity${kind === 'attention' ? ' vcl-attention' : ''}`);
+    const dot = element('span', `vcl-activity ${kind === 'attention' ? 'vcl-attention' : 'vcl-running'}`);
     dot.title = label; dot.setAttribute('aria-hidden', 'true'); return dot;
   }
   onListKey(event) {

@@ -9,7 +9,8 @@ const root = fileURLToPath(new URL('../', import.meta.url));
 const readingOnly = process.argv.length === 3 && process.argv[2] === '--reading';
 const reasoningOnly = process.argv.length === 3 && process.argv[2] === '--reasoning';
 const archiveOnly = process.argv.length === 3 && process.argv[2] === '--archive';
-if (process.argv.length > 2 && !readingOnly && !reasoningOnly && !archiveOnly) throw new Error('用法：node tools/check-ui.mjs [--reading|--reasoning|--archive]');
+const listOnly = process.argv.length === 3 && process.argv[2] === '--list';
+if (process.argv.length > 2 && !readingOnly && !reasoningOnly && !archiveOnly && !listOnly) throw new Error('用法：node tools/check-ui.mjs [--reading|--reasoning|--archive|--list]');
 const output = path.join(root, '.scratch', 'ui');
 await fs.mkdir(output, { recursive: true });
 const executable = [
@@ -192,7 +193,27 @@ try {
   await send('Emulation.setDeviceMetricsOverride', { width: 1100, height: 800, deviceScaleFactor: 1, mobile: false }, sessionId);
   await send('Page.navigate', { url: address }, sessionId);
   await waitFor(`document.querySelector('.vcl-count')?.textContent.includes('63 个聊天')`);
-  if (archiveOnly) {
+  if (listOnly) {
+    await assertBrowser(`document.querySelector('.vcl-project-row').getBoundingClientRect().height===26
+      &&document.querySelector('.vcl-thread-row').getBoundingClientRect().height===22
+      &&document.querySelector('.vcl-chat-more').getBoundingClientRect().height===22`, '目录、聊天或操作按钮没有采用确认的紧凑行高');
+    await assertBrowser(`getComputedStyle(document.querySelector('.vcl-project-row')).backgroundColor!=='rgba(0, 0, 0, 0)'
+      &&getComputedStyle(document.querySelector('.vcl-threads')).borderInlineStartStyle==='solid'
+      &&document.querySelector('.vcl-thread .vcl-chat-icon')`, '项目底色、聊天分支或对话图标缺失');
+    await assertBrowser(`document.querySelector('[data-vcl-key="thread:thread-0"] .vcl-running')
+      &&getComputedStyle(document.querySelector('.vcl-running')).animationName==='vcl-spin'`, '进行中的聊天没有旋转加载圈');
+    await screenshot('navigation-list-light.png');
+    await evaluate(`document.documentElement.dataset.theme='dark';document.body.style.background='#181818';document.body.style.color='#eee'`);
+    await assertBrowser(`getComputedStyle(document.querySelector('.vcl-project-row')).backgroundColor!==getComputedStyle(document.getElementById('vcl-navigation')).backgroundColor`, '深色主题下目录与聊天没有视觉区分');
+    await screenshot('navigation-list-dark.png');
+    await send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] }, sessionId);
+    await assertBrowser(`getComputedStyle(document.querySelector('.vcl-running')).animationName==='none'`, '减少动态效果偏好没有停用旋转');
+    await evaluate(`document.getElementById('vcl-archive').click()`);
+    await waitFor(`document.querySelector('.vcl-archived-thread')&&!document.querySelector('.vcl-loading')`);
+    await assertBrowser(`document.querySelector('.vcl-archived-thread').getBoundingClientRect().height>=60
+      &&document.querySelector('.vcl-archived-thread .vcl-thread-meta')`, '紧凑样式挤压归档日期或恢复说明');
+    console.log('列表专项无头检查通过：目录 26px、聊天 22px、图标按钮、目录底色、缩进分支、浅深主题、旋转圈、减少动态效果和归档元数据。');
+  } else if (archiveOnly) {
     await evaluate(`document.querySelector('[data-vcl-key="thread:thread-0"]').click();
       window.beforeArchiveRoute=mockRoute;document.getElementById('native-composer').value='保留当前草稿';
       document.querySelector('[data-vcl-key="project:d:/other/project"]').click();
