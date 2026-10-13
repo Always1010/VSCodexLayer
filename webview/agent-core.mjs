@@ -3,7 +3,7 @@ const labels = { running: '运行中', pendingInit: '启动中', completed: '已
   waitingOnApproval: '等待审批', waitingOnUserInput: '等待输入' };
 
 export class AgentCatalog {
-  constructor() { this.threads = new Map(); this.liveThreads = new Map(); this.turns = new Map(); this.liveActions = new Map(); this.runtime = new Map(); }
+  constructor() { this.threads = new Map(); this.liveThreads = new Map(); this.turns = new Map(); this.liveActions = new Map(); this.runtime = new Map(); this.revision = 0; }
   page(threads) {
     for (const thread of threads) this.threads.set(thread.id, { ...thread, ...this.liveThreads.get(thread.id) });
   }
@@ -25,18 +25,20 @@ export class AgentCatalog {
     if (event?.type === 'agent-action') {
       let turns = this.turns.get(event.threadId); if (!turns) this.turns.set(event.threadId, turns = new Map());
       let actions = turns.get(event.turnId); if (!actions) turns.set(event.turnId, actions = new Map());
-      actions.set(event.action.id, event.action); this.liveActions.set(`${event.threadId}:${event.turnId}:${event.action.id}`, true); return true;
+      actions.set(event.action.id, event.action);
+      const revision = this.runtime.get(event.threadId)?.seen.includes(event.turnId) ? 0 : ++this.revision;
+      this.liveActions.set(`${event.threadId}:${event.turnId}:${event.action.id}`, revision); return true;
     }
     if (event?.type === 'agent-state') {
       const previous = this.runtime.get(event.threadId);
       if (previous?.seen.includes(event.turnId) || previous?.turnId === event.turnId
         && previous.status !== 'running' && event.status === 'running') return false;
       const seen = previous && previous.turnId !== event.turnId ? [...previous.seen, previous.turnId].slice(-32) : previous?.seen ?? [];
-      this.runtime.set(event.threadId, { turnId: event.turnId, status: event.status, seen }); return true;
+      this.runtime.set(event.threadId, { turnId: event.turnId, status: event.status, seen, revision: ++this.revision }); return true;
     }
     if (event?.type === 'thread-activity' && event.phase === 'status') {
       const thread = this.threads.get(event.threadId);
-      const update = { status: event.status, activeFlags: event.activeFlags };
+      const update = { status: event.status, activeFlags: event.activeFlags, runtimeRevision: ++this.revision };
       this.liveThreads.set(event.threadId, { ...this.liveThreads.get(event.threadId), ...update });
       if (thread) { Object.assign(thread, update); return true; }
     }
@@ -56,7 +58,10 @@ export class AgentCatalog {
           thread.task = action.prompt ?? thread.task; thread.model = action.model ?? thread.model;
           thread.reasoningEffort = action.reasoningEffort ?? thread.reasoningEffort;
         }
-        if (action.states[id]) thread.taskStatus = action.states[id];
+        const revision = this.liveActions.get(`${sender}:${turnId}:${action.id}`) ?? 0;
+        if (action.states[id] && revision >= (thread.taskRevision ?? 0)) {
+          thread.taskStatus = action.states[id]; thread.taskRevision = revision;
+        }
         threads.set(id, thread);
         if (sender === rootId && turnId === currentTurn) involved.add(id);
       }
@@ -69,10 +74,11 @@ export class AgentCatalog {
         if (seen.has(thread.id)) continue; seen.add(thread.id);
         const current = inTurn || involved.has(thread.id);
         const runtime = this.runtime.get(thread.id);
-        let status = runtime?.status ?? thread.taskStatus ?? 'unknown';
-        if (!runtime || runtime.status === 'running') {
+        const taskRevision = thread.taskRevision ?? 0, runtimeRevision = runtime?.revision ?? -1;
+        let status = runtimeRevision >= taskRevision ? runtime.status : thread.taskStatus ?? runtime?.status ?? 'unknown';
+        if ((thread.runtimeRevision ?? 0) >= Math.max(taskRevision, runtimeRevision)) {
           if (thread.status === 'active') status = thread.activeFlags?.find((flag) => flag === 'waitingOnApproval' || flag === 'waitingOnUserInput') ?? 'running';
-          else if (thread.status === 'systemError' && !runtime) status = 'errored';
+          else if (thread.status === 'systemError') status = 'errored';
         }
         if (scope === 'all' || current) rows.push({ ...thread, depth, current, taskStatus: status, statusLabel: labels[status] ?? labels.unknown,
           name: thread.nickname || thread.title || thread.id });

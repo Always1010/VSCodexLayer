@@ -38,6 +38,10 @@ test('迟到分页和历史不能覆盖实时任务状态，新轮次不会被�
   assert.equal(catalog.rows('root')[0].statusLabel, '等待审批');
   catalog.receive({ type: 'agent-state', threadId: 'a', turnId: 'a2', status: 'interrupted' });
   assert.equal(catalog.rows('root')[0].statusLabel, '已中断');
+  catalog.receive({ type: 'agent-action', threadId: 'root', turnId: 'r2', action: action('reuse', 'sendInput', ['a'], { a: 'running' }) });
+  assert.equal(catalog.rows('root')[0].statusLabel, '运行中', '复用 Agent 的新调用不能被旧轮次终态或审批标记覆盖');
+  catalog.receive({ type: 'agent-action', threadId: 'root', turnId: 'r2', action: action('wait-new', 'wait', ['a'], { a: 'completed' }) });
+  assert.equal(catalog.rows('root')[0].statusLabel, '已完成', '未订阅子线程时也应采用新的协作任务终态');
 });
 
 test('子 Agent 列表读取活动和归档的全部分页，重复游标保留已发现记录并允许重试', async () => {
