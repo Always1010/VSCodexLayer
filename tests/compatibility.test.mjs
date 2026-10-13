@@ -11,6 +11,19 @@ import { patchReasoningActivity, patchReasoningRenderer, patchReadTarget } from 
 import { patchProjectDraftReset } from '../adapters/draft-lifecycle.mjs';
 import { checkNativeDraftLifecycle } from '../tools/native-draft-lifecycle.mjs';
 import { archiveDependencies, patchMenuHeader, validateHeaderImports } from '../adapters/chat-menu.mjs';
+import { buildAgentDetailHeader, patchAgentDetailHeader } from '../adapters/agent-detail.mjs';
+
+test('缺少原生子聊天组件保留完整聊天入口，标题桥歧义时拒绝转换', async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'vcl-agent-detail-'));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  await fs.mkdir(path.join(root, 'webview', 'assets'), { recursive: true });
+  const original = 'export{Header as t};';
+  const result = await buildAgentDetailHeader(root, original);
+  assert.equal(result.header, original); assert.equal(result.compatibility.supported, false);
+  const detail = { file: 'webview/assets/thread.js', component: 't', initializer: 's' };
+  assert.throws(() => patchAgentDetailHeader(original, detail), /增强聊天标题/);
+  assert.throws(() => patchAgentDetailHeader('export{__vclHeader as t};export{__vclHeader as t};', detail), /数量异常/);
+});
 
 test('原生归档恢复接入缺失或歧义时拒绝生成补丁', () => {
   const source = 'import{a as scope,b as atom,c as service,d as pins,e as OpenError}from"./native.js";'

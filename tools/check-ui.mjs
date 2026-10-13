@@ -236,12 +236,40 @@ try {
     await assertBrowser(`document.querySelector('.vcl-agent-counts').textContent.includes('已发现')&&document.querySelectorAll('.vcl-agent-row').length>0`, '失败丢弃已有子 Agent 或误报完整数量');
     await evaluate(`window.mockAgentsError=false;document.querySelector('[data-agent-key="retry"]').click()`);
     await waitFor(`!document.querySelector('.vcl-agent-error')&&!document.querySelector('.vcl-agent-list[aria-busy="true"]')`);
+    await evaluate(`window.mockDetailRequests=[];window.mockDetailFailure=false;
+      window.mockDetailRelease=__vscodexLayerBridge.registerAgentDetailSurface({}, {prepare:async(root,id)=>{
+        mockDetailRequests.push([root,id]);if(mockDetailFailure)throw Error('模拟原生加载失败');}});
+      __vscodexLayerBridge.subscribeAgentDetail(()=>{const target=__vscodexLayerBridge.agentDetailTarget();if(!target||target.loading)return;
+        const content=document.createElement('article');content.className='mock-agent-transcript';content.dataset.thread=target.threadId;
+        content.tabIndex=0;content.textContent='官方子聊天示意：'+target.threadId;target.container.replaceChildren(content);});
+      document.getElementById('native-composer').value='父聊天未发送内容';
+      document.querySelector('[data-agent-key="agent-history"]').click()`);
+    await waitFor(`document.querySelector('.mock-agent-transcript')?.dataset.thread==='agent-history'`);
+    await assertBrowser(`mockRoute==='/local/thread-0?view=review'&&document.getElementById('native-composer').value==='父聊天未发送内容'
+      &&!document.querySelector('.vcl-agent-native-detail textarea')`, '详情切换主聊天或接管其草稿');
+    await evaluate(`document.querySelector('.mock-agent-transcript').focus();window.postMessage({type:'vscodex-layer/event',event:{type:'agent-state',threadId:'agent-status',turnId:'status-done',status:'completed'}},location.origin)`);
+    await waitFor(`document.querySelector('.mock-agent-transcript')?.dataset.thread==='agent-history'`);
+    await assertBrowser(`mockDetailRequests.length===1&&document.activeElement.classList.contains('mock-agent-transcript')`, '状态重绘丢失详情正文、焦点或重复读取');
+    await evaluate(`__vscodexLayerBridge.selectAgentDetail('agent-nested')`);
+    await waitFor(`document.querySelector('.mock-agent-transcript')?.dataset.thread==='agent-nested'`);
+    await assertBrowser(`mockRoute==='/local/thread-0?view=review'`, '侧栏中的嵌套链接切换主聊天');
+    await evaluate(`document.querySelector('[data-agent-key="detail-back"]').click()`);
+    await waitFor(`document.querySelectorAll('.vcl-agent-row').length===3`);
+    await evaluate(`window.mockDetailFailure=true;document.querySelector('[data-agent-key="agent-history"]').click()`);
+    await waitFor(`document.querySelector('[data-agent-key="detail-fallback"]')`);
+    await assertBrowser(`mockRoute==='/local/thread-0?view=review'`, '加载失败离开主聊天');
+    await evaluate(`document.querySelector('[data-agent-key="detail-fallback"]').click()`);
+    await waitFor(`mockRoute==='/local/agent-history'&&!document.getElementById('vcl-agent-return').hidden`);
+    await evaluate(`document.getElementById('vcl-agent-back').click()`);
+    await waitFor(`mockRoute==='/local/thread-0?view=review'`);
+    await evaluate(`document.querySelector('.vcl-agent-trigger').click()`);
     await evaluate(`document.documentElement.dataset.theme='dark'`); await screenshot('agents-dark.png');
+    await assertBrowser(`getComputedStyle(document.getElementById('vcl-agent-panel')).color==='rgb(238, 238, 238)'`, '深色主题概览文字不可读');
     await evaluate(`document.querySelector('[data-agent-key="close"]').click()`);
     await assertBrowser(`document.getElementById('vcl-agent-panel').hidden&&document.activeElement.classList.contains('vcl-agent-trigger')`, '关闭未返回入口焦点');
     await evaluate(`mockNavigate('/local/thread-8')`);
     await waitFor(`document.getElementById('vcl-agent-tools').hidden`);
-    console.log('子 Agent 专项无头检查通过：完整分页、数量与本轮树、实时状态、固定侧栏与窄窗口浮层、原生路由与嵌套返回、查询参数恢复、失败保留与重试、主题及关闭焦点。');
+    console.log('子 Agent 专项无头检查通过：完整分页、数量与本轮树、实时状态、固定侧栏与窄窗口浮层、原生路由与嵌套返回、查询参数恢复、失败保留与重试、详情保持主聊天和草稿、嵌套详情、原生失败回退、主题及关闭焦点。');
   } else if (activityOnly) {
     await evaluate(`window.projectHeading=()=>document.querySelector('[data-vcl-key="project:d:/wrk/vscodexlayer"]');
       window.emitActivity=(threadId,phase,status='idle',activeFlags=[])=>window.postMessage({type:'vscodex-layer/event',event:{type:'thread-activity',threadId,phase,status,activeFlags}},location.origin);

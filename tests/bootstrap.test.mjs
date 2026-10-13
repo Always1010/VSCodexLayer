@@ -3,6 +3,35 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import vm from 'node:vm';
 
+test('子聊天详情绑定点击时编号，切换与关闭后迟到加载及错误不影响当前详情', async () => {
+  const context = vm.createContext({ document: { querySelector: () => null }, queueMicrotask,
+    acquireVsCodeApi: () => ({ postMessage() {}, getState() {}, setState() {} }) });
+  vm.runInContext(await fs.readFile(new URL('../webview/bootstrap.js', import.meta.url), 'utf8'), context);
+  const bridge = context.__vscodexLayerBridge, pending = new Map(), requests = [], errors = [];
+  const release = bridge.registerAgentDetailSurface({}, { prepare: (rootId, id) => {
+    requests.push([rootId, id]); return new Promise((resolve) => pending.set(id, resolve));
+  } });
+  bridge.subscribeAgentDetail(() => { throw new Error('broken subscriber'); });
+  bridge.subscribeAgentDetailError((message) => errors.push(message));
+  const container = { isConnected: true }, input = { rootId: 'root', threadId: 'first' };
+  const first = bridge.openAgentDetail(input, container); input.threadId = 'mutated';
+  const oldToken = bridge.agentDetailTarget().token;
+  const second = bridge.openAgentDetail({ rootId: 'root', threadId: 'second' }, container);
+  pending.get('first')(); assert.equal((await first).opened, false);
+  pending.get('second')(); assert.equal((await second).opened, true);
+  assert.deepEqual(requests, [['root', 'first'], ['root', 'second']]);
+  assert.equal(bridge.agentDetailTarget().threadId, 'second'); assert.equal(bridge.agentDetailTarget().loading, false);
+  bridge.agentDetailError('旧详情失败', oldToken);
+  bridge.agentDetailError('当前详情失败', bridge.agentDetailTarget().token);
+  await new Promise((resolve) => setImmediate(resolve)); assert.deepEqual(errors, ['当前详情失败']);
+  const third = bridge.openAgentDetail({ rootId: 'root', threadId: 'third' }, container);
+  bridge.closeAgentDetail(); pending.get('third')(); assert.equal((await third).opened, false);
+  assert.equal(bridge.agentDetailTarget(), null);
+  await assert.rejects(bridge.openAgentDetail({ rootId: 'root', threadId: '../invalid' }, container), /位置无效/);
+  assert.equal(requests.length, 3);
+  release(); assert.equal(bridge.hasAgentDetail(), false);
+});
+
 test('官方仅获取一次 API，草稿状态原样透传，路由观察错误不影响官方', async () => {
   let calls = 0;
   let state = { draft: 'unsent message' };

@@ -11,6 +11,7 @@ import { checkProjectSubmit } from './native-project-submit.mjs';
 import { checkNativeReasoning } from './native-reasoning.mjs';
 import { checkNativeDraftLifecycle } from './native-draft-lifecycle.mjs';
 import { checkNativeChatMenu } from './native-chat-menu.mjs';
+import { checkNativeAgentDetail } from './native-agent-detail.mjs';
 
 const args = process.argv.slice(2);
 if (args.length && (args[0] !== '--extension' || args.length !== 2)) {
@@ -18,6 +19,7 @@ if (args.length && (args[0] !== '--extension' || args.length !== 2)) {
 }
 const directory = args[1] ?? await findExtension();
 const plan = await buildCompatiblePatchPlan(directory);
+await checkNativeAgentDetail(plan, directory);
 const byPath = (relative) => plan.files.find((entry) => entry.path === relative)?.content.toString();
 const route = byPath(plan.compatibility.route);
 checkNativeDraftLifecycle(route);
@@ -129,5 +131,5 @@ try {
   for (const entry of plan.files.filter((file) => file.originalHash !== null)) {
     assert.equal(sha256(await fs.readFile(path.join(fixture, entry.path))), entry.originalHash);
   }
-  console.log(`官方 ${plan.extensionVersion} 兼容结构校验通过：${plan.compatibility.family}；原生聊天菜单与 Portal、指定聊天操作和运行中确认、推理摘要、宿主初始化、SSH / WSL 边界、项目首次发送、语法、临时副本更新、重复应用和恢复均通过。实际插件未修改。`);
+  console.log(`官方 ${plan.extensionVersion} 兼容结构校验通过：${plan.compatibility.family}；原生聊天菜单与 Portal、子聊天只读详情${plan.compatibility.agentDetail.supported ? '' : '（当前包未提供，沿用完整聊天入口）'}、指定聊天操作和运行中确认、推理摘要、宿主初始化、SSH / WSL 边界、项目首次发送、语法、临时副本更新、重复应用和恢复均通过。实际插件未修改。`);
 } finally { await fs.rm(fixture, { recursive: true, force: true }); }

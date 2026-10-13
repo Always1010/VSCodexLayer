@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { extensionRoot, readUnpatched, sha256 } from '../lib/patch-engine.mjs';
 import { buildReasoningPatchFiles } from './reasoning.mjs';
 import { buildChatMenuPatch } from './chat-menu.mjs';
+import { buildAgentDetailHeader } from './agent-detail.mjs';
 import { patchProjectDraftReset } from './draft-lifecycle.mjs';
 
 export const FAMILY = 'codex-webview-family-1';
@@ -248,7 +249,8 @@ export async function buildCompatiblePatchPlan(directory) {
   files.push(...reasoning.files);
   const headerEntry = files.find((file) => file.path === header.path);
   const menu = await buildChatMenuPatch(root, headerEntry.content);
-  headerEntry.content = menu.header;
+  const agentDetail = await buildAgentDetailHeader(directory, menu.header);
+  headerEntry.content = agentDetail.header;
   files.push(menu.file);
   for (const [source, target] of [
     ['runtime/host.cjs', 'out/vscodex-layer-host.cjs'],
@@ -266,5 +268,5 @@ export async function buildCompatiblePatchPlan(directory) {
   for (const entry of files) entry.syntax = syntaxType(entry.path);
   return validateGeneratedCode({ adapter: `${FAMILY}:${version}`, extensionVersion: version, files,
     compatibility: { family: FAMILY, route: route.path, composer: composer.path, header: header.path,
-      reasoning: reasoning.compatibility, chatMenu: menu.compatibility } });
+      reasoning: reasoning.compatibility, chatMenu: menu.compatibility, agentDetail: agentDetail.compatibility } });
 }

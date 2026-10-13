@@ -4,6 +4,7 @@ export class AgentOverview {
   constructor(client, bridge, navigation, { element, iconButton, icon }) {
     Object.assign(this, { client, bridge, navigation, element, iconButton, icon });
     this.catalog = new AgentCatalog(); this.sequence = 0; this.scope = 'current';
+    this.detailSequence = 0;
     this.abort = new AbortController();
     this.tools = element('div', 'vcl-agent-tools'); this.tools.id = 'vcl-agent-tools'; this.tools.hidden = true;
     this.trigger = element('button', 'vcl-agent-trigger'); this.trigger.type = 'button';
@@ -15,6 +16,16 @@ export class AgentOverview {
     this.unsubscribe = client.onEvent((event) => {
       if (this.catalog.receive(event)) this.render();
     });
+    this.removeDetailError = bridge.subscribeAgentDetailError?.((message) => {
+      if (!this.detail || this.disposed) return;
+      this.detail.loading = false; this.detail.error = message; bridge.closeAgentDetail(); this.render();
+    });
+    this.removeDetailTarget = bridge.subscribeAgentDetail?.(() => {
+      if (!this.disposed && this.detail && !this.detail.loading && !this.detail.error && !bridge.agentDetailTarget()) {
+        this.detail.error = '官方详情连接已关闭，请打开完整聊天。'; this.render();
+      }
+    });
+    this.removeDetailSelect = bridge.setAgentDetailSelectHandler?.((id) => this.selectNested(id));
     const options = { signal: this.abort.signal };
     window.addEventListener('resize', () => this.layout(), options);
     document.addEventListener('pointerdown', (event) => {
@@ -35,6 +46,7 @@ export class AgentOverview {
     const root = complete ? ancestors.at(-1) ?? thread : thread;
     if (this.root?.id === root.id) { this.render(); return; }
     this.root = root; this.opened = false; this.pinned = false; this.scope = 'current';
+    this.clearDetail();
     await this.load();
   }
   async loadIndex() {
@@ -90,7 +102,7 @@ export class AgentOverview {
     this.loading = false; this.render();
   }
   setOpen(open, focus = true) {
-    this.opened = open; if (!open) this.pinned = false;
+    this.opened = open; if (!open) { this.pinned = false; this.clearDetail(); }
     this.render();
     if (focus) (open ? this.panel.querySelector('button') : this.trigger)?.focus({ preventScroll: true });
   }
@@ -114,17 +126,40 @@ export class AgentOverview {
     this.trigger.title = this.trigger.getAttribute('aria-label');
     this.trigger.setAttribute('aria-expanded', String(!!this.opened));
     this.panel.hidden = !this.opened || !visible;
+    const signature = this.detail ? [this.detailSequence, this.detail.loading, this.detail.error, !!this.pinned].join('|') : null;
+    // Keep the native portal container attached during routine status updates;
+    // moving it would discard keyboard focus and text selection in the transcript.
+    if (signature && signature === this.detailSignature) { this.layout(); return; }
+    this.detailSignature = signature;
     const focused = this.panel.contains(document.activeElement) ? document.activeElement.dataset.agentKey : null;
     const scroll = this.panel.querySelector('.vcl-agent-list')?.scrollTop ?? 0;
     const header = this.element('div', 'vcl-agent-panel-header');
-    header.append(this.element('strong', '', '子 Agent'));
     const button = (name, label, key, callback) => { const node = this.iconButton(name, label, callback); node.dataset.agentKey = key; return node; };
+    if (this.detail) header.append(button('back', '返回子 Agent 概览', 'detail-back', () => {
+      this.clearDetail(); this.render(); this.panel.querySelector('button')?.focus({ preventScroll: true });
+    }));
+    header.append(this.element('strong', '', this.detail?.row.name ?? '子 Agent'));
     const pin = button('pin', this.pinned ? '取消固定子 Agent 面板' : '固定子 Agent 面板（宽窗口使用侧栏）', 'pin', () => {
       this.pinned = !this.pinned; this.render();
     }); pin.setAttribute('aria-pressed', String(!!this.pinned));
-    header.append(button('refresh', '刷新子 Agent', 'refresh', () => this.load(true)), pin,
+    if (this.detail) header.append(button('open', '在主区域打开完整子聊天', 'detail-open', () => this.openFullThread(this.detail.row)));
+    header.append(button('refresh', this.detail ? '重新加载子聊天' : '刷新子 Agent', 'refresh', () => this.detail ? this.openAgent(this.detail.row) : this.load(true)), pin,
       button('close', '关闭子 Agent 面板', 'close', () => this.setOpen(false)));
     const context = this.element('div', 'vcl-agent-context', this.root?.title ?? ''); context.title = context.textContent;
+    this.panel.classList.toggle('vcl-detail', !!this.detail);
+    if (this.detail) {
+      const detail = this.detail, notice = this.element('div', 'vcl-agent-detail-notice');
+      if (detail.loading) { notice.textContent = '正在加载官方子聊天…'; notice.setAttribute('role', 'status'); }
+      if (detail.error) {
+        const error = this.element('div', 'vcl-agent-error', `子聊天侧栏加载失败：${detail.error}`); error.setAttribute('role', 'alert'); notice.append(error);
+        const full = this.element('button', 'vcl-agent-retry', '打开完整聊天'); full.type = 'button'; full.dataset.agentKey = 'detail-fallback';
+        full.addEventListener('click', () => this.openFullThread(detail.row)); notice.append(full);
+      }
+      const model = this.element('div', 'vcl-agent-context', [detail.row.model, detail.row.reasoningEffort].filter(Boolean).join(' · '));
+      this.panel.replaceChildren(header, context, model, notice, detail.body);
+      if (focused) [...this.panel.querySelectorAll('[data-agent-key]')].find((node) => node.dataset.agentKey === focused)?.focus({ preventScroll: true });
+      this.layout(); return;
+    }
     const filter = this.element('div', 'vcl-agent-filters');
     for (const [value, label] of [['current', '本轮'], ['all', '整个聊天']]) {
       const node = this.element('button', '', label); node.type = 'button'; node.dataset.agentKey = value;
@@ -149,6 +184,11 @@ export class AgentOverview {
       item.append(line);
       if (row.task) item.append(this.element('span', 'vcl-agent-task', row.task));
       if (row.model) item.append(this.element('span', 'vcl-agent-muted', `${row.model}${row.reasoningEffort ? ` · ${row.reasoningEffort}` : ''}`));
+      const created = new Date((row.createdAt ?? 0) * 1000);
+      if (row.createdAt > 0 && Number.isFinite(created.getTime())) {
+        const time = this.element('time', 'vcl-agent-muted', `创建于 ${created.toLocaleString()}`);
+        time.dateTime = created.toISOString(); item.append(time);
+      }
       item.title = `${row.name}，${row.statusLabel}${row.task ? `\n${row.task}` : ''}`;
       item.addEventListener('click', () => this.openAgent(row)); list.append(item);
     }
@@ -156,12 +196,45 @@ export class AgentOverview {
     if (focused) [...this.panel.querySelectorAll('[data-agent-key]')].find((node) => node.dataset.agentKey === focused)?.focus({ preventScroll: true });
     this.layout();
   }
-  openAgent(row) {
-    this.navigation.remember(); this.navigation.open(row.id);
-    if (!this.pinned) this.setOpen(false, false);
+  async openAgent(row) {
+    if (!this.bridge.hasAgentDetail?.()) { this.openFullThread(row); return; }
+    this.clearDetail(); const sequence = this.detailSequence;
+    const body = this.element('div', 'vcl-agent-native-detail');
+    this.detail = { row, body, loading: true }; this.opened = true; this.render();
+    try {
+      const result = await this.bridge.openAgentDetail({ rootId: this.root.id, threadId: row.id }, body);
+      if (this.disposed || sequence !== this.detailSequence) return;
+      if (!result.opened) throw new Error('官方详情连接已关闭，请打开完整聊天。');
+      this.detail.loading = false; this.render();
+    } catch (error) {
+      if (this.disposed || sequence !== this.detailSequence) return;
+      this.detail.loading = false; this.detail.error = error.message || '请打开完整聊天查看。'; this.render();
+    }
+  }
+  async selectNested(threadId) {
+    if (!this.detail || !this.root) return;
+    const sequence = this.detailSequence, rootId = this.root.id;
+    try {
+      const ancestry = await this.client.request('ancestry', { threadId });
+      if (this.disposed || sequence !== this.detailSequence) return;
+      if (!ancestry.ancestors.some((thread) => thread.id === rootId)) throw new Error('子聊天不属于当前主聊天。');
+      await this.openAgent(this.catalog.rows(rootId).find((row) => row.id === threadId)
+        ?? { id: threadId, name: ancestry.thread.title });
+    } catch (error) {
+      if (!this.disposed && sequence === this.detailSequence) {
+        this.detail.error = error.message; this.bridge.closeAgentDetail(); this.render();
+      }
+    }
+  }
+  openFullThread(row) {
+    this.navigation.remember(); this.navigation.open(row.id); this.setOpen(false, false);
+  }
+  clearDetail() {
+    this.detailSequence++; this.detail = null; this.bridge.closeAgentDetail?.();
   }
   dispose() {
     this.disposed = true; this.sequence++; this.unsubscribe(); this.abort.abort();
+    this.clearDetail(); this.removeDetailError?.(); this.removeDetailTarget?.(); this.removeDetailSelect?.();
     this.navigation.onAncestry = null; this.navigation.onRouteChange = null;
     this.tools.remove(); this.panel.remove();
     document.body.classList.remove('vcl-agents-present', 'vcl-agents-pinned');
