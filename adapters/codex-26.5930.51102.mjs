@@ -5,6 +5,7 @@ import { extensionRoot, readOriginal } from '../lib/patch-engine.mjs';
 import { patchProjectCreationMembership } from './codex-compatible.mjs';
 import { buildReasoningPatchFiles } from './reasoning.mjs';
 import { buildChatMenuPatch } from './chat-menu.mjs';
+import { buildAgentDetailHeader } from './agent-detail.mjs';
 import { patchProjectDraftReset } from './draft-lifecycle.mjs';
 
 export const VERSION = '26.5930.51102';
@@ -133,7 +134,8 @@ export async function buildPatchPlan(directory) {
   const reasoning = await buildReasoningPatchFiles(directory);
   originals.push(...reasoning.files);
   const menu = await buildChatMenuPatch(directory, originals[3].content);
-  originals[3].content = menu.header;
+  const agentDetail = await buildAgentDetailHeader(directory, menu.header);
+  originals[3].content = agentDetail.header;
   originals.push(menu.file);
   const assets = [
     ['runtime/host.cjs', 'out/vscodex-layer-host.cjs'],
@@ -153,5 +155,5 @@ export async function buildPatchPlan(directory) {
   }
   for (const entry of originals) entry.syntax = syntaxType(entry.path);
   return validateGeneratedCode({ adapter: ADAPTER, extensionVersion: VERSION, files: originals,
-    compatibility: { reasoning: reasoning.compatibility, chatMenu: menu.compatibility } });
+    compatibility: { reasoning: reasoning.compatibility, chatMenu: menu.compatibility, agentDetail: agentDetail.compatibility } });
 }

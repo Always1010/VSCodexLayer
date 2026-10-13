@@ -9,6 +9,15 @@
   const archiveSubscribers = new Set();
   const archiveActions = new Map();
   const menuErrorSubscribers = new Set();
+  const agentDetailSurfaces = new Map();
+  const agentDetailSubscribers = new Set();
+  const agentDetailErrors = new Set();
+  let agentDetailTarget = null;
+  let agentDetailSequence = 0;
+  let agentDetailSelect;
+  const notifyAgentDetail = () => {
+    for (const callback of agentDetailSubscribers) { try { callback(); } catch { /* Isolate native render subscribers. */ } }
+  };
   let menuTarget = null;
   let menuSequence = 0;
   const notifyMenu = () => {
@@ -43,6 +52,46 @@
     });
   };
   globalThis.__vscodexLayerBridge = Object.freeze({
+    registerAgentDetailSurface(surface, actions) {
+      agentDetailSurfaces.set(surface, actions);
+      return () => {
+        agentDetailSurfaces.delete(surface);
+        if (agentDetailTarget?.surface === surface) { agentDetailTarget = null; notifyAgentDetail(); }
+      };
+    },
+    hasAgentDetail() { return agentDetailSurfaces.size > 0; },
+    subscribeAgentDetail(callback) { agentDetailSubscribers.add(callback); return () => agentDetailSubscribers.delete(callback); },
+    agentDetailTarget() { return agentDetailTarget; },
+    async openAgentDetail(detail, container) {
+      const surface = agentDetailSurfaces.keys().next().value;
+      if (!surface) throw new Error('官方子 Agent 详情尚未就绪。');
+      if (![detail?.rootId, detail?.threadId].every((id) => typeof id === 'string' && /^[\w-]{1,200}$/.test(id))
+        || !container?.isConnected) throw new Error('子 Agent 详情位置无效。');
+      const target = { surface, container, rootId: detail.rootId, threadId: detail.threadId,
+        token: ++agentDetailSequence, loading: true };
+      agentDetailTarget = target; notifyAgentDetail();
+      try {
+        await agentDetailSurfaces.get(surface).prepare(target.rootId, target.threadId);
+        if (agentDetailTarget !== target) return { opened: false };
+        agentDetailTarget = { ...target, loading: false }; notifyAgentDetail();
+        return { opened: true };
+      } catch (error) {
+        if (agentDetailTarget === target) { agentDetailTarget = null; notifyAgentDetail(); }
+        throw error;
+      }
+    },
+    closeAgentDetail() { if (agentDetailTarget) { agentDetailTarget = null; notifyAgentDetail(); } },
+    subscribeAgentDetailError(callback) { agentDetailErrors.add(callback); return () => agentDetailErrors.delete(callback); },
+    agentDetailError(message, token) {
+      queueMicrotask(() => {
+        if (agentDetailTarget?.token !== token) return;
+        for (const callback of agentDetailErrors) { try { callback(message); } catch { /* Preserve the parent chat. */ } }
+      });
+    },
+    setAgentDetailSelectHandler(handler) {
+      agentDetailSelect = handler; return () => { if (agentDetailSelect === handler) agentDetailSelect = undefined; };
+    },
+    selectAgentDetail(threadId) { agentDetailSelect?.(threadId); },
     subscribeThreadMenu(callback) { menuSubscribers.add(callback); return () => menuSubscribers.delete(callback); },
     threadMenuTarget() { return menuTarget; },
     registerThreadMenuSurface(surface) {

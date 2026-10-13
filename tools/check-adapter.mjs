@@ -9,12 +9,14 @@ import { applyPatch, restorePatch, sha256, readOriginal } from '../lib/patch-eng
 import { checkNativeReasoning } from './native-reasoning.mjs';
 import { checkNativeDraftLifecycle } from './native-draft-lifecycle.mjs';
 import { checkNativeChatMenu } from './native-chat-menu.mjs';
+import { checkNativeAgentDetail } from './native-agent-detail.mjs';
 
 // Only read the real installation. Exercise mutations in a newly created fixture.
 const args = process.argv.slice(2);
 if (args.length && (args[0] !== '--extension' || args.length !== 2)) throw new Error('用法：node tools/check-adapter.mjs [--extension 路径]');
 const directory = args[1] ?? await findExtension();
 const plan = await buildPatchPlan(directory);
+await checkNativeAgentDetail(plan, directory);
 new Script(plan.files.find((entry) => entry.path === 'out/extension.js').content);
 await checkNativeReasoning(plan);
 await checkNativeChatMenu(plan);
