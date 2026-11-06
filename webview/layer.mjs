@@ -162,6 +162,16 @@ class Navigation {
     this.cleanups.push(this.bridge.subscribeThreadMenuError((message) => {
       this.closeMenuAnchor(); this.showError(new Error(`官方聊天菜单加载失败：${message}`));
     }));
+    this.cleanups.push(this.bridge.setArchiveBelowHandler((threadId) => {
+      const thread = this.threads.find((item) => item.id === threadId);
+      if (!thread) return null;
+      const group = { key: normalizePath(thread.cwd), name: projectName(thread.cwd), path: thread.cwd };
+      return { enabled: !this.disposed && !this.batchArchive && this.hasLoaded && !this.loading
+        && selectArchiveThreads(this.threads, group.key, threadId).length > 0,
+      onSelect: () => {
+        this.dismissNativeMenu(); this.closeMenuAnchor(); this.archiveProject(group, threadId);
+      } };
+    }));
     this.cleanups.push(this.client.onEvent((event) => {
       if (event === 'workspace-changed') {
         this.client.request('init').then((next) => {
@@ -422,7 +432,7 @@ class Navigation {
     const keyboard = (event) => {
       if (event.key === 'Escape' || event.key === 'Tab') { if (event.key === 'Escape') event.preventDefault(); this.closeProjectMenu(true); }
       else if (['ArrowUp', 'ArrowDown', 'Home', 'End'].includes(event.key)) {
-        event.preventDefault(); const items = [...menu.querySelectorAll('button')]; const current = items.indexOf(document.activeElement);
+        event.preventDefault(); const items = [...menu.querySelectorAll('button:not(:disabled)')]; const current = items.indexOf(document.activeElement);
         const index = event.key === 'Home' ? 0 : event.key === 'End' ? items.length - 1 : (current + (event.key === 'ArrowUp' ? -1 : 1) + items.length) % items.length;
         items[index].focus();
       }
@@ -441,15 +451,16 @@ class Navigation {
       if (!this.list.contains(document.activeElement) && !this.projectForm.contains(document.activeElement)) this.addProjectButton.focus({ preventScroll: true });
     } catch (error) { if (!this.disposed) this.showError(error); }
   }
-  async archiveProject(group) {
+  async archiveProject(group, belowId) {
     if (this.disposed || this.batchArchive || !this.hasLoaded || this.loading) return;
     if (document.querySelector('[role="dialog"], [aria-modal="true"]')) {
       this.showError(new Error('请先完成或关闭当前对话框，再批量归档。')); return;
     }
-    const threads = selectArchiveThreads(this.threads, group.key).map((thread) => ({ ...thread }));
+    const threads = selectArchiveThreads(this.threads, group.key, belowId).map((thread) => ({ ...thread }));
     if (!threads.length) return;
     const batch = { threads, cancelled: false }; this.batchArchive = batch;
-    const confirmed = await this.confirmBatchArchive(group, threads.length);
+    const pivot = belowId === undefined ? null : this.threads.find((thread) => thread.id === belowId);
+    const confirmed = await this.confirmBatchArchive(group, threads.length, pivot);
     if (!confirmed || this.disposed) {
       this.batchArchive = null;
       for (const view of ['active', 'archived']) if (this.cache(view).dirty) this.scheduleRefresh(view);
@@ -481,13 +492,15 @@ class Navigation {
     for (const view of ['active', 'archived']) if (this.cache(view).dirty) this.scheduleRefresh(view);
     if (document.activeElement === document.body) this.archiveButton.focus({ preventScroll: true });
   }
-  confirmBatchArchive(group, count) {
+  confirmBatchArchive(group, count, pivot) {
     return new Promise((resolve) => {
       const dialog = element('dialog', 'vcl-batch-dialog');
       dialog.setAttribute('aria-labelledby', 'vcl-batch-title');
       dialog.setAttribute('aria-describedby', 'vcl-batch-description');
-      const title = element('strong', '', '归档全部聊天'); title.id = 'vcl-batch-title';
-      const description = element('p', '', `将归档“${group.name}”项目的全部 ${count} 条聊天，包含折叠和搜索未显示的聊天。`);
+      const title = element('strong', '', pivot ? '归档下方聊天' : '归档全部聊天'); title.id = 'vcl-batch-title';
+      const description = element('p', '', pivot
+        ? `将归档“${group.name}”项目中位于“${pivot.title}”下方的 ${count} 条聊天，保留“${pivot.title}”及其上方聊天。范围包含折叠和搜索未显示的聊天。`
+        : `将归档“${group.name}”项目的全部 ${count} 条聊天，包含折叠和搜索未显示的聊天。`);
       description.id = 'vcl-batch-description';
       const detail = element('p', '', '正在运行、等待交互或关联定时任务的聊天会跳过。归档后可从“已归档聊天”恢复。');
       const path = element('p', 'vcl-batch-path', group.path || '未分类');

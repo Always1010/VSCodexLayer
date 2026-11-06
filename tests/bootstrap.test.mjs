@@ -83,6 +83,17 @@ test('官方仅获取一次 API，草稿状态原样透传，路由观察错误�
   assert.equal(items.at(-1).onSelect, choose, '删除必须保留原生确认动作');
   assert.equal(items.at(-1).enabled, false, '删除必须保留原生能力限制');
   assert.equal(items.at(-1).selectAfterClose, true, '关闭菜单后再打开原生确认');
+  const belowCalls = [];
+  const removeBelow = bridge.setArchiveBelowHandler((threadId) => ({ enabled: true, onSelect: () => belowCalls.push(threadId) }));
+  const batchItem = bridge.filterThreadMenu([{ id: 'archive-thread', onSelect: choose }], 'next', bridge.threadMenuTarget().token).at(-1);
+  assert.equal(batchItem.id, 'vcl-archive-below');
+  assert.equal(batchItem.message.defaultMessage, '归档下方聊天…');
+  assert.equal(batchItem.selectAfterClose, true);
+  batchItem.onSelect(); assert.deepEqual(belowCalls, ['next']);
+  bridge.openThreadMenu({ id: 'another' }, container);
+  batchItem.onSelect(); assert.deepEqual(belowCalls, ['next'], '旧菜单不能归档新菜单范围');
+  removeBelow();
+  assert.equal(bridge.filterThreadMenu([{ id: 'archive-thread' }]).length, 1);
   let archived;
   const unsubscribeArchived = bridge.subscribeThreadArchived((id) => { archived = id; });
   bridge.threadArchived('other'); assert.equal(archived, 'other');

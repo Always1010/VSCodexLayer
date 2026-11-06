@@ -40,7 +40,7 @@ export function patchThreadMenu(source) {
   const menuBuilder = unique([...body.matchAll(new RegExp(`await ${identifier}\\(\\{scope:${identifier},surface:\`header\``, 'g'))], '原生侧栏聊天操作');
   body = body.replace(menuBuilder[0], menuBuilder[0].replace('surface:`header`', 'surface:__vclLayerMenu?`sidebar`:`header`'));
   body = body.replace(`getItems:${menuGetter},renderItem:`,
-    `getItems:__vclLayerMenu?()=>Promise.resolve().then(()=>${menuGetter}()).then(items=>{let result=globalThis.__vscodexLayerBridge.filterThreadMenu(items);`
+    `getItems:__vclLayerMenu?()=>Promise.resolve().then(()=>${menuGetter}()).then(items=>{let result=globalThis.__vscodexLayerBridge.filterThreadMenu(items,${props}.conversationId,__vclMenuToken);`
     + `if(!result.length)throw new Error("此聊天暂无可用操作。");return result}).catch(error=>{globalThis.__vscodexLayerBridge?.threadMenuError(error.message,__vclMenuToken);throw error}):${menuGetter},renderItem:`);
   const archive = unique([...body.matchAll(new RegExp(`conversationId:(${identifier}),hostId:(${identifier}),source:(${identifier}),onArchiveStart:(${identifier}),appHistory:`, 'g'))], '归档完成回调');
   body = body.replace(archive[0], `conversationId:${archive[1]},hostId:${archive[2]},source:${archive[3]},`

@@ -153,6 +153,15 @@ export async function checkNativeChatMenu(plan) {
   assert.equal(portal.node.props.children.props.conversationId, 'other');
   assert.equal(portal.node.props.children.props.__vclLayerMenu, true);
   assert.equal(portal.node.props.children.props.archiveNavigation, 'stay');
+  const belowCalls = [];
+  const removeBelow = context.__vscodexLayerBridge.setArchiveBelowHandler((id) => ({ enabled: true, onSelect: () => belowCalls.push(id) }));
+  const token = context.__vscodexLayerBridge.threadMenuTarget().token;
+  const belowMenu = await findMenu(context[name]({ ...props, __vclMenuToken: token })).getItems();
+  const below = belowMenu.find((item) => item.id === 'vcl-archive-below');
+  assert.equal(below.message.defaultMessage, '归档下方聊天…');
+  assert.equal(below.selectAfterClose, true);
+  below.onSelect(); assert.deepEqual(belowCalls, ['other']);
+  removeBelow();
 
   // Execute the generated restoration bridge inside the same native providers.
   const restored = [], invalidated = [], cleanup = [], batchArchived = [];

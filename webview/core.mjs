@@ -94,8 +94,11 @@ export function routeThreadId(route) {
 }
 
 // Use the complete project list, independent of search and the five-row preview.
-export function selectArchiveThreads(threads, projectKey) {
-  return groupThreads(threads).find((group) => group.key === projectKey)?.threads ?? [];
+export function selectArchiveThreads(threads, projectKey, belowId) {
+  const project = groupThreads(threads).find((group) => group.key === projectKey)?.threads ?? [];
+  if (belowId === undefined) return project;
+  const index = project.findIndex((thread) => thread.id === belowId);
+  return index < 0 ? [] : project.slice(index + 1);
 }
 
 export function navigationEdits(before, after) {

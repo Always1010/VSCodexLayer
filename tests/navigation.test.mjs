@@ -11,6 +11,13 @@ test('批量归档使用项目完整列表和固定顺序，隔离同名目录',
   assert.deepEqual(selectArchiveThreads(threads, normalizePath('D:/A/Project')).map((thread) => thread.id),
     ['t7', 't6', 't5', 't4', 't3', 't2', 't1', 't0']);
   assert.deepEqual(selectArchiveThreads(threads, '/missing'), []);
+  const key = normalizePath('D:/A/Project');
+  assert.deepEqual(selectArchiveThreads(threads, key, 't5').map((thread) => thread.id), ['t4', 't3', 't2', 't1', 't0']);
+  assert.deepEqual(selectArchiveThreads(threads, key, 't0'), []);
+  assert.deepEqual(selectArchiveThreads(threads, key, 'other'), []);
+  assert.deepEqual(selectArchiveThreads(threads, key, 'removed'), []);
+  const tied = [{ id: 'a', cwd: '/p', createdAt: 10 }, { id: 'b', cwd: '/p', createdAt: 10 }, { id: 'unknown', cwd: '/p' }];
+  assert.deepEqual(selectArchiveThreads(tied, '/p', 'a').map((thread) => thread.id), ['b', 'unknown']);
 });
 
 test('切换聊天后迟到的父关系不会覆盖新聊天，销毁后不绘制返回入口', async () => {
@@ -233,7 +240,7 @@ test('读取全部分页并去重，拒绝循环游标和中途取消', async ()
 async function navigationFixture(client, timers = { setTimeout, clearTimeout }) {
   const source = await fs.readFile(new URL('../webview/layer.mjs', import.meta.url), 'utf8');
   const context = vm.createContext({ ...timers, structuredClone, ThreadActivity, navigationEdits,
-    overlayNavigationEdits, AbortController, loadAllThreads, groupThreads, normalizePath, routeThreadId,
+    overlayNavigationEdits, AbortController, loadAllThreads, groupThreads, normalizePath, routeThreadId, selectArchiveThreads,
     URL, document: { activeElement: null, querySelector: () => null },
   });
   vm.runInContext(source.slice(source.indexOf('const SVG'), source.indexOf('const bridge = globalThis'))

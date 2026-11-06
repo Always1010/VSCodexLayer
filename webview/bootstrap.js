@@ -20,6 +20,7 @@
   };
   let menuTarget = null;
   let menuSequence = 0;
+  let archiveBelowHandler;
   const notifyMenu = () => {
     for (const callback of menuSubscribers) { try { callback(); } catch { /* Isolate native render subscribers. */ } }
   };
@@ -118,7 +119,11 @@
         for (const callback of menuErrorSubscribers) { try { callback(error); } catch { /* Isolate navigation error reporting. */ } }
       });
     },
-    filterThreadMenu(items) {
+    setArchiveBelowHandler(handler) {
+      archiveBelowHandler = handler;
+      return () => { if (archiveBelowHandler === handler) archiveBelowHandler = undefined; };
+    },
+    filterThreadMenu(items, threadId = menuTarget?.thread.id, token = menuTarget?.token) {
       const allowed = new Set(['rename-thread', 'share-thread', 'copy-deeplink', 'copy-conversation-markdown',
         'copy-working-directory', 'archive-thread', 'delete-thread']);
       const filter = (values) => values.flatMap((item) => {
@@ -129,6 +134,13 @@
       });
       const result = filter(items);
       const archive = result.findIndex((item) => item.id === 'archive-thread');
+      if (archive >= 0 && archiveBelowHandler && menuTarget?.token === token && menuTarget?.thread.id === threadId) {
+        const action = archiveBelowHandler(threadId);
+        if (action) result.splice(archive + 1, 0, { ...result[archive], id: 'vcl-archive-below',
+          message: { id: 'vscodexLayer.archiveBelow', defaultMessage: '归档下方聊天…' },
+          enabled: action.enabled === true, selectAfterClose: true,
+          onSelect: () => { if (menuTarget?.token === token && menuTarget?.thread.id === threadId) action.onSelect(); } });
+      }
       if (archive > 0) result.splice(archive, 0, { id: 'vcl-archive-separator', type: 'separator' });
       return result;
     },

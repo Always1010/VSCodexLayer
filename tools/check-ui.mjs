@@ -132,9 +132,13 @@ __vscodexLayerBridge.subscribeThreadMenu(()=>{
     trigger.dataset.state='open';trigger.setAttribute('aria-expanded','true');
     const menu=document.createElement('div');menu.className='mock-native-menu';menu.setAttribute('role','menu');
     const rect=target.container.getBoundingClientRect();Object.assign(menu.style,{position:'fixed',left:Math.max(0,Math.min(rect.left,innerWidth-210))+'px',top:Math.max(0,Math.min(rect.bottom,innerHeight-180))+'px',width:'210px',padding:'8px',zIndex:100,background:'white',border:'1px solid #ddd'});
-    for(const [id,label] of [['rename-thread','重命名'],['share-thread','分享'],['copy-deeplink','复制深度链接'],['copy-conversation-markdown','复制为 Markdown'],['copy-working-directory','复制工作目录'],['archive-thread','归档'],['delete-thread','永久删除']]){
+    const nativeItems=[['rename-thread','重命名'],['share-thread','分享'],['copy-deeplink','复制深度链接'],['copy-conversation-markdown','复制为 Markdown'],['copy-working-directory','复制工作目录'],['archive-thread','归档'],['delete-thread','永久删除']].map(([id,label])=>({id,message:{defaultMessage:label}}));
+    for(const item of __vscodexLayerBridge.filterThreadMenu(nativeItems,target.thread.id,target.token)){
+      if(item.type==='separator')continue;const id=item.id,label=item.message.defaultMessage;
       const button=document.createElement('button');button.setAttribute('role','menuitem');button.dataset.action=id;button.textContent=label;button.style.display='block';
+      button.disabled=item.enabled===false;
       button.onclick=()=>{mockActionCalls.push({id,threadId:target.thread.id});close();
+        if(item.onSelect){item.onSelect();return}
         if(id==='rename-thread'){const chat=mockThreads.find(t=>t.id===target.thread.id);chat.title='重命名后的聊天';window.postMessage({type:'vscodex-layer/event',event:'threads-changed'},location.origin)}
         if(id==='archive-thread'){
           if(mockArchiveFailure){document.getElementById('native-title').textContent='归档失败';return}
@@ -232,6 +236,24 @@ try {
     };expandAllProjects()`);
   }
   if (batchArchiveOnly) {
+    await evaluate(`window.openChatBelow=id=>document.querySelector('[data-vcl-key="thread:'+id+'"]').closest('.vcl-thread-row').dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,cancelable:true}));
+      mockThreads.push(...Array.from({length:9},(_,index)=>({id:'batch-'+index,title:'批次聊天'+index,cwd:'D:/Batch/Project',createdAt:3000+index,status:'idle'})));
+      window.postMessage({type:'vscodex-layer/event',event:'threads-changed'},location.origin)`);
+    await waitFor(`document.querySelector('[data-vcl-key="thread:batch-5"]')&&!document.querySelector('[aria-label="刷新聊天列表"]').disabled`);
+    await evaluate(`document.querySelector('.vcl-input').value='批次聊天0';document.querySelector('.vcl-input').dispatchEvent(new Event('input'));openChatBelow('batch-0')`);
+    await waitFor(`document.querySelector('[data-action="vcl-archive-below"]')`);
+    await assertBrowser(`document.querySelector('[data-action="vcl-archive-below"]').disabled`, '最后一条聊天仍可归档下方');
+    await evaluate(`document.querySelector('.mock-native-menu').dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));
+      document.querySelector('.vcl-input').value='批次聊天5';document.querySelector('.vcl-input').dispatchEvent(new Event('input'));mockNavigate('/local/batch-8');openChatBelow('batch-5')`);
+    await waitFor(`document.querySelector('[data-action="vcl-archive-below"]')`);
+    await evaluate(`document.querySelector('[data-action="vcl-archive-below"]').click()`);
+    await waitFor(`document.querySelector('dialog[open]')`);
+    await assertBrowser(`document.getElementById('vcl-batch-description').textContent.includes('下方的 5 条')&&document.getElementById('vcl-batch-description').textContent.includes('保留')&&mockRoute==='/local/batch-8'`, '下方范围未覆盖搜索隐藏项或误切换右侧');
+    await evaluate(`document.querySelector('[data-action="confirm-batch-archive"]').click()`);
+    await waitFor(`document.querySelector('.vcl-project-notice').textContent.includes('已归档 5 条')`);
+    await assertBrowser(`mockBatchCalls.join(',')==='batch-4,batch-3,batch-2,batch-1,batch-0'
+      &&mockThreads.some(t=>t.id==='batch-5')&&mockThreads.filter(t=>t.cwd==='D:/Batch/Project').length===4&&mockRoute==='/local/batch-8'`, '归档下方包含基准聊天、上方聊天或顺序错误');
+    await evaluate(`mockBatchCalls=[]`);
     await evaluate(`window.openProjectArchive=key=>{
       document.querySelector('[data-vcl-key="project:'+key+'"]').dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,cancelable:true}));
       document.querySelector('[data-action="archive-project"]').click()
@@ -249,6 +271,8 @@ try {
     await waitFor(`mockBatchCalls.length===1`);
     await evaluate(`openProjectArchive('d:/wrk/project')`);
     await assertBrowser(`document.querySelector('[data-action="archive-project"]').disabled&&!document.querySelector('dialog')&&mockBatchCalls.length===1`, '批量处理中可重复启动');
+    await evaluate(`document.querySelector('.vcl-project-menu').dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowDown',bubbles:true,cancelable:true}))`);
+    await assertBrowser(`document.activeElement.dataset.action==='copy-project-path'`, '项目菜单键盘焦点未跳过禁用项');
     await evaluate(`document.querySelector('.vcl-project-menu').dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}))`);
     await evaluate(`mockThreads.unshift({id:'new-during-batch',title:'批次开始后新建',cwd:'D:/WRK/Project',createdAt:9999});
       mockHoldBatch=false;finishBatch()`);
@@ -268,7 +292,7 @@ try {
     await evaluate(`document.querySelector('[aria-label="停止归档剩余聊天"]').click();mockHoldBatch=false;finishBatch()`);
     await waitFor(`document.querySelector('.vcl-project-notice').textContent.includes('未处理 24 条')`);
     await assertBrowser(`mockBatchCalls.length===beforeStop+1&&mockThreads.filter(t=>t.cwd==='D:/Other/Project').length===24`, '停止后仍归档剩余聊天');
-    console.log('项目批量归档无头检查通过：完整范围、搜索与折叠隐藏项、确认取消、运行及关联任务跳过、部分失败保留、批次快照、项目隔离和当前聊天返回草稿。');
+    console.log('批量归档无头检查通过：项目全部归档、下方范围且保留基准聊天、末条禁用、完整范围与搜索隐藏项、确认取消、运行及关联任务跳过、失败保留、批次快照、重复保护、中途停止、项目隔离和当前聊天返回草稿。');
   } else if (deleteOnly) {
     await evaluate(`mockDrafts['/']='保留首页草稿';mockDrafts[mockDraftKey('/?vclProjectCwd=D%3A%2FWRK%2FVSCodexLayer')]='保留项目草稿';
       mockNavigate('/?vclProjectCwd=D%3A%2FWRK%2FVSCodexLayer')`);
