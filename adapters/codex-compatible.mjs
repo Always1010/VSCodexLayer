@@ -25,7 +25,7 @@ async function originalsIn(directory, prefix) {
   const { root } = await extensionRoot(directory);
   const assetDirectory = path.join(root, 'webview', 'assets');
   const entries = await fs.readdir(assetDirectory, { withFileTypes: true });
-  return Promise.all(entries.filter((entry) => entry.isFile() && entry.name.startsWith(prefix) && entry.name.endsWith('.js'))
+  return Promise.all(entries.filter((entry) => entry.isFile() && (Array.isArray(prefix) ? prefix : [prefix]).some((value) => entry.name.startsWith(value)) && entry.name.endsWith('.js'))
     .map(async (entry) => {
       const relative = `webview/assets/${entry.name}`;
       return { path: relative, bytes: await readUnpatched(root, relative) };
@@ -63,7 +63,7 @@ function patchHtml(source) {
     + '    <script type="module" src="./vscodex-layer/layer.mjs"></script>\n    $&', '页面模块');
 }
 
-function patchRoute(source) {
+function patchRouteObservation(source) {
   const routeHook = new RegExp(`(${identifier})\\(\`navigate-to-route\`,(${identifier})\\);let (${identifier});`);
   const match = [...source.matchAll(new RegExp(routeHook.source, 'g'))];
   if (match.length !== 1) throw new Error(`路由观察接入点数量异常：${match.length}`);
@@ -73,6 +73,11 @@ function patchRoute(source) {
   source = insertAt(source, match[0].index,
     `globalThis.__vscodexLayerBridge?.observeRoute(${routeVariable}.pathname+${routeVariable}.search);`);
 
+  return source;
+}
+
+function patchRoute(source) {
+  source = patchRouteObservation(source);
   source = replaceUnique(source,
     new RegExp(`function (${identifier})\\((${identifier}),(${identifier})\\)\\{(?=let\\{activeProject:)`),
     (_all, name, scope, options) => `function ${name}(${scope},${options}){if(globalThis.__vscodexLayerBridge?.resumeDraft(${options}))return;`,
@@ -108,6 +113,47 @@ function patchRoute(source) {
       `if(${isClient}(${value}))return ${value};if(${isDraft}(${value})||${value}.startsWith(\`vscodex-layer-new:\`))return ${getter}(${atom},${value});let`,
     '草稿客户标识');
   return patchProjectDraftReset(source);
+}
+
+export function patchSplitRouteScope(source) {
+  source = replaceUnique(source,
+    new RegExp(`function (${identifier})\\(\\{pathname:(${identifier}),routeTemplate:(${identifier}),search:(${identifier})=\`\`\\}\\)\\{`),
+    (_all, name, pathname, template, search) => `function ${name}({pathname:${pathname},routeTemplate:${template},search:${search}=\`\`}){`
+      + `let __vclRoute=globalThis.__vscodexLayerBridge?.projectRoute(${pathname},${template},${search});if(__vclRoute)return __vclRoute;`,
+    '项目路由');
+  // Route identity helpers moved out of app-initial and gained native draft IDs.
+  const routeKey = new RegExp(`function (${identifier})\\((${identifier})\\)\\{(?=(?:(?!function ).){0,140}switch\\(\\2\\.routeKind\\)\\{case\`home\`:return [^;]+;case\`new-thread-panel\`)`, 'g');
+  const matches = [...source.matchAll(routeKey)];
+  if (matches.length !== 2) throw new Error(`路由草稿键接入点数量异常：${matches.length}`);
+  source = source.replace(routeKey, (_all, name, value) =>
+    `function ${name}(${value}){if(${value}.vclDraftKey!=null)return ${value}.vclDraftKey;`);
+  source = replaceUnique(source,
+    new RegExp(`if\\((${identifier})\\((${identifier})\\)\\)return \\2;if\\((${identifier})\\(\\2\\)\\)return (${identifier})\\((${identifier}),\\2\\);let`),
+    (_all, isClient, value, isDraft, getter, atom) =>
+      `if(${isClient}(${value}))return ${value};if(${isDraft}(${value})||${value}.startsWith(\`vscodex-layer-new:\`))return ${getter}(${atom},${value});let`,
+    '草稿客户标识');
+  return patchProjectDraftReset(source);
+}
+
+export function patchSplitComposerScope(source) {
+  const valueKey = new RegExp(`function (${identifier})\\((${identifier})\\)\\{(?=(?:switch\\(\\2\\.kind\\)\\{case\`new\`|if\\(\\2\\.kind!==\`new\`\\)))`, 'g');
+  const matches = [...source.matchAll(valueKey)];
+  if (matches.length !== 3) throw new Error(`聊天草稿键接入点数量异常：${matches.length}`);
+  source = source.replace(valueKey, (_all, name, value) =>
+    `function ${name}(${value}){if(${value}.kind===\`new\`&&${value}.vclDraftKey!=null)return ${value}.vclDraftKey;`);
+  return replaceUnique(source,
+    new RegExp(`function (${identifier})\\((${identifier}),(${identifier}),(${identifier})\\)\\{let (${identifier})=(${identifier})\\(\\2\\);switch\\(\\2\\.routeKind\\)\\{`),
+    (_all, name, route, options, mention, conversation, helper) =>
+      `function ${name}(${route},${options},${mention}){if(${route}.vclDraftKey!=null)return{kind:\`new\`,entrypoint:${route}.routeKind===\`home\`?\`home\`:\`panel\`,`
+      + `browserTabMentionConversationId:${mention}??null,routeConversationId:null,vclDraftKey:${route}.vclDraftKey,vclProjectCwd:${route}.vclProjectCwd};`
+      + `let ${conversation}=${helper}(${route});switch(${route}.routeKind){`, '路由上下文');
+}
+
+function patchSplitNewChat(source) {
+  return replaceUnique(source,
+    new RegExp(`function (${identifier})\\((${identifier}),(${identifier})\\)\\{(?=let\\{activeProject:)`),
+    (_all, name, scope, options) => `function ${name}(${scope},${options}){if(globalThis.__vscodexLayerBridge?.resumeDraft(${options}))return;`,
+    '原生新聊天');
 }
 
 function arrowBody(source, marker, label) {
@@ -188,8 +234,8 @@ function patchComposer(source) {
       `existingWorkspaceRoot:__vclProjectCwd??${workspace},localProjectId:__vclProjectCwd!==undefined?undefined:${localProject},remoteProjectId:__vclProjectCwd!==undefined?undefined:${remoteProject}?.id,workspaceRoots:${roots}`,
     'Composer 创建上下文');
   source = replaceUnique(source,
-    new RegExp(`(${identifier})=\\{\\.\\.\\.(${identifier}),\\.\\.\\.(${identifier}),attachmentOrder:`),
-    (_all, context, base, extra) => `${context}={...${base},...${extra},vclProjectCwd:__vclProjectCwd,attachmentOrder:`,
+    new RegExp(`(${identifier})=\\{\\.\\.\\.(${identifier}),\\.\\.\\.(${identifier}),(?=(?:responseTextAnnotations|attachmentOrder):)`),
+    (_all, context, base, extra) => `${context}={...${base},...${extra},vclProjectCwd:__vclProjectCwd,`,
     'Composer 草稿上下文');
 
   const submitMarker = 'startConversationWithPrimaryRuntimeForFirstTurn:';
@@ -200,9 +246,14 @@ function patchComposer(source) {
   const mounted = new RegExp(`isMounted:(${identifier})`).exec(source.slice(Math.max(0, markerIndex - 1800), markerIndex))?.[1];
   if (!submitMatch || !mounted) throw new Error('无法识别首次提交局部变量。');
   const submitStart = markerIndex + submitMatch.index;
+  const submitBodyStart = source.indexOf('}){', markerIndex);
+  if (submitBodyStart < 0 || submitBodyStart >= submitStart) throw new Error('无法识别首次提交外层函数。');
   const [submitHeader, context, cwd, , target] = submitMatch;
-  const injection = `if(${context}.vclProjectCwd!==undefined){let __vclProject=await globalThis.__vscodexLayerBridge.validateProject(${context}.vclProjectCwd);if(!${mounted}())throw new DOMException(\`Composer was closed\`,\`AbortError\`);${context}={...${context},existingWorkspaceRoot:__vclProject.cwd,workspaceRoots:[__vclProject.cwd],localProjectId:undefined,remoteProjectId:undefined,cloudThreadPrototype:undefined,aeonStartTarget:undefined};${target}={...${target},hostId:\`local\`,workspaceRoots:[__vclProject.cwd]};${cwd}=__vclProject.cwd;}`;
+  const injection = `if(${context}.vclProjectCwd!==undefined){let __vclProject=await globalThis.__vscodexLayerBridge.validateProject(${context}.vclProjectCwd);if(!__vclIsMounted())throw new DOMException(\`Composer was closed\`,\`AbortError\`);${context}={...${context},existingWorkspaceRoot:__vclProject.cwd,workspaceRoots:[__vclProject.cwd],localProjectId:undefined,remoteProjectId:undefined,cloudThreadPrototype:undefined,aeonStartTarget:undefined};${target}={...${target},hostId:\`local\`,workspaceRoots:[__vclProject.cwd]};${cwd}=__vclProject.cwd;}`;
   source = source.slice(0, submitStart) + submitHeader + injection + source.slice(submitStart + submitHeader.length);
+  // The submit closure can reuse the minified parameter name as a local binding.
+  // Capture the outer callback before that closure introduces its own scope.
+  source = insertAt(source, submitBodyStart + 3, `const __vclIsMounted=${mounted};`);
   return patchProjectCreationMembership(source);
 }
 
@@ -226,20 +277,34 @@ function patchHeader(source) {
 
 export async function buildCompatiblePatchPlan(directory) {
   const { root, version } = await extensionRoot(directory);
-  const appFiles = await originalsIn(root, 'app-initial-');
+  const appFiles = await originalsIn(root, ['app-initial-', 'app-runtime-', 'composer-content-']);
   const headerFiles = await originalsIn(root, 'header-');
   const route = choose(appFiles, (source) => source.includes('/extension/panel/new')
     && source.includes('navigate-to-route') && (source.split('activeWorkspaceRoot').length - 1) <= 2, '路由模块');
   const composer = choose(appFiles, (source) => (source.split('activeWorkspaceRoot').length - 1) >= 3
     && source.includes('startConversationWithPrimaryRuntimeForFirstTurn'), 'Composer 模块');
   const header = choose(headerFiles, (source) => source.includes('header.recentChats') && source.includes('tasksQuery'), '首页模块');
+  const splitRoute = route.path.split('/').at(-1).startsWith('app-runtime-');
+  const routeModules = [route.path];
   const official = [
     ['out/extension.js', patchHost],
     ['webview/index.html', patchHtml],
-    [route.path, patchRoute],
+    [route.path, splitRoute ? patchRouteObservation : patchRoute],
     [header.path, patchHeader],
     [composer.path, patchComposer],
   ];
+  if (splitRoute) {
+    const scopeFiles = await originalsIn(root, ['route-scope-', 'composer-scope-', 'use-start-new-conversation-']);
+    for (const [predicate, transform, label] of [
+      [(source) => source.includes('draft-thread-identities-v1') && source.includes('routeTemplate:'), patchSplitRouteScope, '路由作用域模块'],
+      [(source) => source.includes('browserTabMentionConversationId') && source.includes('homeDraftKey:'), patchSplitComposerScope, 'Composer 作用域模块'],
+      [(source) => source.includes('let{activeProject:') && source.includes('prefillComposerMode:'), patchSplitNewChat, '新聊天模块'],
+    ]) {
+      const file = choose(scopeFiles, predicate, label);
+      official.push([file.path, transform]);
+      routeModules.push(file.path);
+    }
+  }
   const files = [];
   for (const [relative, transform] of official) {
     const bytes = await readUnpatched(root, relative);
@@ -268,5 +333,6 @@ export async function buildCompatiblePatchPlan(directory) {
   for (const entry of files) entry.syntax = syntaxType(entry.path);
   return validateGeneratedCode({ adapter: `${FAMILY}:${version}`, extensionVersion: version, files,
     compatibility: { family: FAMILY, route: route.path, composer: composer.path, header: header.path,
+      routeModules, composerModules: [composer.path],
       reasoning: reasoning.compatibility, chatMenu: menu.compatibility, agentDetail: agentDetail.compatibility } });
 }

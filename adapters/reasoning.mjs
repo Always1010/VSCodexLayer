@@ -94,16 +94,16 @@ export function patchReadTarget(source) {
 
 export async function buildReasoningPatchFiles(root) {
   const entries = await fs.readdir(path.join(root, 'webview', 'assets'));
-  async function select(prefix, marker) {
-    const candidates = await Promise.all(entries.filter((name) => name.startsWith(prefix) && name.endsWith('.js'))
+  async function select(prefixes, marker) {
+    const candidates = await Promise.all(entries.filter((name) => prefixes.some((prefix) => name.startsWith(prefix)) && name.endsWith('.js'))
       .map(async (name) => {
         const relative = `webview/assets/${name}`;
         return { path: relative, bytes: await readUnpatched(root, relative) };
       }));
     return unique(candidates.filter(({ bytes }) => bytes.toString().includes(marker)), marker);
   }
-  const activity = await select('agent-activity-item-', 'dynamicToolCallRenderer:');
-  const renderer = await select('sites-end-resource-', 'reasoning-markdown');
+  const activity = await select(['agent-activity-item-'], 'dynamicToolCallRenderer:');
+  const renderer = await select(['sites-end-resource-', 'subagent-activity-chip-group-'], 'reasoning-markdown');
   const activityPatch = patchReasoningActivity(activity.bytes.toString());
   const rendererPatch = patchReasoningRenderer(renderer.bytes.toString());
   const readTarget = patchReadTarget(rendererPatch.content);

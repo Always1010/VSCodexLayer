@@ -10,7 +10,8 @@ function unique(matches, label) {
   return matches[0];
 }
 function exported(source, local) {
-  return unique([...source.matchAll(new RegExp(`\\b${escape(local)} as (${identifier})(?=[,}])`, 'g'))], '子聊天依赖导出')[1];
+  const bindings = [...source.matchAll(/export\{([^}]+)\}/g)].map((match) => match[1]).join(',');
+  return unique([...bindings.matchAll(new RegExp(`(?:^|,)${escape(local)} as (${identifier})(?=,|$)`, 'g'))], '子聊天依赖导出')[1];
 }
 
 export function patchAgentDetailHeader(header, { file, component, initializer }) {

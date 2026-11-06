@@ -9,7 +9,8 @@ function unique(matches, label) {
   return matches[0];
 }
 function exportName(source, local) {
-  return unique([...source.matchAll(new RegExp(`\\b${escape(local)} as (${identifier})(?=[,}])`, 'g'))], '菜单依赖导出')[1];
+  const bindings = [...source.matchAll(/export\{([^}]+)\}/g)].map((match) => match[1]).join(',');
+  return unique([...bindings.matchAll(new RegExp(`(?:^|,)${escape(local)} as (${identifier})(?=,|$)`, 'g'))], '菜单依赖导出')[1];
 }
 function imported(source, local) {
   for (const match of source.matchAll(/import\{([^}]+)\}from["']([^"']+)["']/g)) {
@@ -55,10 +56,13 @@ export function archiveDependencies(source) {
   const restore = unique([...source.matchAll(new RegExp(`await (${identifier})\\((${identifier}),${identifier}\\)\\.unarchiveConversation\\(${identifier},\\{useAppServerPins:\\2\\.get\\((${identifier})\\)\\}\\)`, 'g'))], '原生归档恢复服务');
   const scope = unique([...source.matchAll(new RegExp(`\\b${escape(restore[2])}=(${identifier})\\((${identifier})\\)`, 'g'))], '原生归档恢复作用域');
   const openError = [...new Set([...source.matchAll(new RegExp(`instanceof (${identifier})`, 'g'))].map((match) => match[1]))];
+  const predicate = [...source.matchAll(new RegExp(`\\?\\.\\((${identifier})\\((${identifier})\\)\\?\`restored\`:null\\),\\1\\(\\2\\)\\?`, 'g'))];
+  const errorLocal = predicate.length ? unique(predicate, '原生恢复后加载错误判断')[1]
+    : unique(openError, '原生恢复后加载错误');
   const initializer = unique([...source.matchAll(new RegExp(`export\\{(${identifier}) as n,`, 'g'))], '原生归档恢复初始化')[1];
   return { initializer: exportName(source, initializer), scope: imported(source, scope[1]), scopeAtom: imported(source, scope[2]),
     service: imported(source, restore[1]), pins: imported(source, restore[3]),
-    openError: imported(source, unique(openError, '原生恢复后加载错误')) };
+    openError: imported(source, errorLocal), openErrorKind: predicate.length ? 'predicate' : 'constructor' };
 }
 
 export function patchMenuHeader(source, { menuPath, menu, dom, archive }) {
@@ -85,7 +89,7 @@ export function patchMenuHeader(source, { menuPath, menu, dom, archive }) {
     + `function __vclArchiveActions(){__vclArchiveInit();let R=__vclReact(),scope=__vclArchiveScope(__vclArchiveScopeAtom),surface=R.useRef({}).current;`
     + `R.useEffect(()=>globalThis.__vscodexLayerBridge?.registerArchiveActions(surface,{restore:async target=>{`
     + `try{await __vclArchiveService(scope,"local").unarchiveConversation(target.id,{useAppServerPins:scope.get(__vclArchivePins)})}`
-    + `catch(error){if(!(error instanceof __vclArchiveOpenError))throw error;return{restored:true,openable:false}}`
+    + `catch(error){if(!(${archive.openErrorKind === 'predicate' ? '__vclArchiveOpenError(error)' : 'error instanceof __vclArchiveOpenError'}))throw error;return{restored:true,openable:false}}`
     + `finally{scope.queryClient.invalidateQueries({queryKey:["archived-threads"]}).catch(()=>{})}`
     + `return{restored:true,openable:true}}}),[scope,surface]);return null}`
     + `function __vclHeader(props){let J=__vclJsx();return J.jsxs(J.Fragment,{children:[J.jsx(${exported},props),J.jsx(__vclMenuPortal,{}),J.jsx(__vclArchiveActions,{})]});}`;
@@ -112,6 +116,19 @@ export async function validateHeaderImports(source, readModule) {
   }
 }
 
+export function portalDependency(source) {
+  const portal = /([A-Za-z_$][\w$]*)\.createPortal\(/.exec(source)?.[1];
+  if (portal) return exportName(source, unique([...source.matchAll(new RegExp(`${escape(portal)}=${identifier}\\((${identifier})\\(\\),1\\)`, 'g'))], 'React DOM 依赖')[1]);
+  // New bundles export the CommonJS loader without calling createPortal here.
+  const definitions = [...source.matchAll(/\.createPortal=function\(/g)];
+  const definition = unique(definitions, 'React Portal 实现');
+  const loaders = [...source.slice(0, definition.index).matchAll(new RegExp(`(?:var |,)(${identifier})=${identifier}\\(\\(${identifier}=>\\{`, 'g'))];
+  const native = loaders.at(-1)?.[1];
+  if (!native) throw new Error('无法识别原生 React Portal 加载器。');
+  const publicLoader = unique([...source.matchAll(new RegExp(`(${identifier})=${identifier}\\(\\(\\(${identifier},${identifier}\\)=>\\{[\\s\\S]{0,500}?\\.exports=${escape(native)}\\(\\)\\}\\)\\)`, 'g'))], 'React DOM 公共加载器')[1];
+  return exportName(source, publicLoader);
+}
+
 export async function buildChatMenuPatch(root, header) {
   const directory = path.join(root, 'webview', 'assets');
   const entries = await fs.readdir(directory);
@@ -125,10 +142,7 @@ export async function buildChatMenuPatch(root, header) {
   menu.componentExport = exportName(selected.bytes.toString(), menu.component);
   const frameworkPath = path.posix.join('webview/assets', menu.react.file);
   const framework = (await readUnpatched(root, frameworkPath)).toString();
-  const portal = /([A-Za-z_$][\w$]*)\.createPortal\(/.exec(framework)?.[1];
-  if (!portal) throw new Error('无法识别原生 React Portal。');
-  const requireDom = unique([...framework.matchAll(new RegExp(`${escape(portal)}=${identifier}\\((${identifier})\\(\\),1\\)`, 'g'))], 'React DOM 依赖')[1];
-  const dom = { file: menu.react.file, exported: exportName(framework, requireDom) };
+  const dom = { file: menu.react.file, exported: portalDependency(framework) };
   const archiveCandidates = await Promise.all(entries.filter((name) => name.startsWith('local-preview-footer-') && name.endsWith('.js'))
     .map(async (name) => {
       const relative = `webview/assets/${name}`;

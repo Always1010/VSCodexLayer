@@ -21,7 +21,7 @@ const directory = args[1] ?? await findExtension();
 const plan = await buildCompatiblePatchPlan(directory);
 await checkNativeAgentDetail(plan, directory);
 const byPath = (relative) => plan.files.find((entry) => entry.path === relative)?.content.toString();
-const route = byPath(plan.compatibility.route);
+const route = (plan.compatibility.routeModules ?? [plan.compatibility.route]).map(byPath).join('\n');
 checkNativeDraftLifecycle(route);
 const composer = byPath(plan.compatibility.composer);
 const header = byPath(plan.compatibility.header);
@@ -88,7 +88,7 @@ await checkNativeChatMenu(plan);
 
 const runtimeFiles = [];
 for (const name of await fs.readdir(path.join(directory, 'webview', 'assets'))) {
-  if (!name.startsWith('app-initial-') || !name.endsWith('.js')) continue;
+  if (!['app-initial-', 'src-'].some((prefix) => name.startsWith(prefix)) || !name.endsWith('.js')) continue;
   const source = (await readUnpatched(directory, `webview/assets/${name}`)).toString();
   if (source.includes('canUseProjectlessWorkspace&&') && source.includes('createProjectlessThreadWorkspace')) runtimeFiles.push(source);
 }
@@ -96,15 +96,25 @@ assert.equal(runtimeFiles.length, 1, '首次消息工作区运行时必须唯一
 const regressionComposer = composer.replace(/baseParams:[\w$]+\.vclProjectCwd!==undefined\?\{\.\.\.([\w$]+),projectAssignment:undefined\}:[\w$]+,prepareFirstTurn:/,
   'baseParams:$1,prepareFirstTurn:');
 assert.notEqual(regressionComposer, composer);
-await checkProjectSubmit(regressionComposer, runtimeFiles[0], /projectless-thread-cwd not supported in extension/);
-await checkProjectSubmit(composer, runtimeFiles[0]);
+const dependencySources = {};
+for (const name of await fs.readdir(path.join(directory, 'webview', 'assets'))) {
+  if (!['build-start-conversation-params-', 'app-server-manager-signals-'].some((prefix) => name.startsWith(prefix)) || !name.endsWith('.js')) continue;
+  const relative = `webview/assets/${name}`;
+  dependencySources[relative] = (await readUnpatched(directory, relative)).toString();
+}
+await checkProjectSubmit(regressionComposer, runtimeFiles[0], /projectless-thread-cwd not supported in extension/, dependencySources);
+await checkProjectSubmit(composer, runtimeFiles[0], /fixture-first-turn-ready/, dependencySources);
 
 const temporaryParent = await fs.realpath(os.tmpdir());
 const fixture = await fs.mkdtemp(path.join(temporaryParent, 'vscodex-layer-compatible-'));
 if (!fixture.startsWith(`${temporaryParent}${path.sep}vscodex-layer-compatible-`)) throw new Error('临时验证目录异常。');
 try {
   await fs.copyFile(path.join(directory, 'package.json'), path.join(fixture, 'package.json'));
-  for (const resource of [plan.compatibility.chatMenu.framework, plan.compatibility.chatMenu.archive.path]) {
+  const resources = new Set([plan.compatibility.chatMenu.framework, plan.compatibility.chatMenu.archive.path]);
+  for (const match of header.matchAll(/import\{([^}]+)\}from["']([^"']+)["']/g)) {
+    if (match[1].includes(' as __vcl')) resources.add(path.posix.join('webview/assets', match[2]));
+  }
+  for (const resource of resources) {
     await fs.mkdir(path.dirname(path.join(fixture, resource)), { recursive: true });
     await fs.writeFile(path.join(fixture, resource), await readUnpatched(directory, resource));
   }

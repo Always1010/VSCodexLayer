@@ -22,6 +22,7 @@ export async function checkNativeChatMenu(plan) {
   const actions = local(/\{cancelPendingWorktree:[\w$]+\}=([\w$]+)\(\)/);
   const actionHook = local(/([\w$]+)\(\),\{cancelPendingWorktree:/);
   const pinHook = local(/\{isPinned:[\w$]+,togglePin:[\w$]+\}=([\w$]+)\(/);
+  const pinShortcut = local(/__vclLayerMenu\?null:\(0,[\w$]+\.jsx\)\(([\w$]+),\{enabled:/);
   const atomHook = local(/([\w$]+)\([\w$]+,[\w$]+\)\?\.type===`active`/);
   const unreadState = local(/([\w$]+)\.canMarkUnread/);
   const unreadAtom = local(new RegExp(`let ${unreadState}=[\\w$]+\\(([\\w$]+),`));
@@ -29,7 +30,9 @@ export async function checkNativeChatMenu(plan) {
   const dialog = local(/([\w$]+)\([\w$]+,[\w$]+,\{draftKey:/);
   const command = local(/__vclLayerMenu\|\|([\w$]+)\(`rename-thread`/);
   const shortcut = local(/__vclLayerMenu\|\|([\w$]+)\(`markThreadUnread`/);
-  const automation = local(/await ([\w$]+)\(`list-automations`\)/);
+  const automation = body.includes('`list-automations`')
+    ? local(/await ([\w$]+)\(`list-automations`\)/)
+    : local(/await ([\w$]+)\(\);[\w$]+=[\w$]+\(\{automations:/);
   const intl = local(/[\w$]+=([\w$]+)\(\),[\w$]+=[\w$]+&&!1/);
   const scope = { value: { routeKind: 'local-thread', conversationId: 'current' }, get: () => null };
   const calls = { commands: 0, targets: [], archives: [], titles: [], dialogs: [] };
@@ -56,6 +59,7 @@ export async function checkNativeChatMenu(plan) {
     [actions]: () => ({ cancelPendingWorktree() {} }),
     [actionHook]: () => nativeActions,
     [pinHook]: () => ({ isPinned: false, togglePin() {} }),
+    [pinShortcut]: 'native-pin-shortcut',
     [atomHook]: (atom) => atom?.tag === unreadAtom ? { canMarkUnread: false }
       : atom?.tag === activeAtom && running ? { type: 'active' } : null,
     [command]: () => { calls.commands += 1; },
@@ -155,7 +159,8 @@ export async function checkNativeChatMenu(plan) {
         restored.push({ id, options }); if (restoreError) throw restoreError;
       } };
     },
-    __vclArchivePins: pins, __vclArchiveOpenError: OpenError,
+    __vclArchivePins: pins, __vclArchiveOpenError: plan.compatibility.chatMenu.archive.openErrorKind === 'predicate'
+      ? (error) => error instanceof OpenError : OpenError,
     globalThis: { __vscodexLayerBridge: context.__vscodexLayerBridge },
   });
   vm.runInContext(wrapper, archiveContext);

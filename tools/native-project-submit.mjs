@@ -18,12 +18,11 @@ function capture(source, pattern) {
 
 // Execute the native composer and its real membership callback without a server,
 // then apply the native first-turn workspace decision to the resulting state.
-export async function checkProjectSubmit(composer, runtime, expectedFirstTurnError = /fixture-first-turn-ready/) {
-  const marker = composer.indexOf('startConversationWithPrimaryRuntimeForFirstTurn:');
-  const entryStart = composer.lastIndexOf('function ', marker);
-  const entryName = /^function ([\w$]+)\(/.exec(composer.slice(entryStart))?.[1];
-  assert.ok(entryName);
+export async function checkProjectSubmit(composer, runtime, expectedFirstTurnError = /fixture-first-turn-ready/, dependencySources = {}) {
+  const entryName = capture(composer,
+    `function (${id})\\(\\{scope:${id},[^}]+startConversationWithPrimaryRuntimeForFirstTurn:${id},[^}]+\\}\\)\\{`);
   const entry = functionSource(composer, entryName);
+  const split = entry.includes('useAsbDirect:');
   const signature = entry.slice(0, entry.indexOf('}){'));
   const scope = capture(signature, `scope:(${id}),`);
   const client = capture(signature, `clientThreadId:(${id}),`);
@@ -39,18 +38,19 @@ export async function checkProjectSubmit(composer, runtime, expectedFirstTurnErr
   for (const match of entry.matchAll(new RegExp(`instanceof (${id})`, 'g'))) {
     if (match[1] !== 'Error') bindings[match[1]] = class extends Error {};
   }
-  bind(`let ${id}=${id}\\?${id}:(${id});`, () => '/local/test');
+  bind(split ? `let ${id}=${id}\\?${id}:(${id}),` : `let ${id}=${id}\\?${id}:(${id});`, () => '/local/test');
   bind(`=(${id})\\(${scope},${client}\\),${id}=${id}\\(${context}\\),`, () => async () => false);
-  bind(`=(${id})\\(${context}\\),${id},${id},${id},`, (context) => context.prompt);
+  bind(split ? `=(${id})\\(${context}\\),${id},${id},${id}=` : `=(${id})\\(${context}\\),${id},${id},${id},`, (context) => context.prompt);
   bind(`restoreMessage=(${id})\\(`, ({ context, cwd }) => ({ context, cwd }));
   bind(`\\(0,(${id})\\.default\\)\\(async`, { default: (fn) => fn });
   bind(`(${id})\\.error\\(\x60Error creating local task`, { error() {}, warning() {} });
+  if (split) bind(`throw!(${id})\\(${id}\\)&&`, () => false);
   bind(`=(${id})\\(\\[\\.\\.\\.${params}\\.attachments`, (items) => items);
   bind(`\\?\\[\\]:(${id})\\(${id}\\.imageAttachments\\)`, () => []);
-  bind(`(${id})\\(${id},${context}\\.aeonStartTarget\\)`, () => null);
+  if (!split) bind(`(${id})\\(${id},${context}\\.aeonStartTarget\\)`, () => null);
   bind(`await (${id})\\(\\{scope:${scope},context:`, async (options) => ({ ...options,
     fileAttachments: [], addedFiles: [], input: [{ type: 'text', text: options.prompt }], config: {} }));
-  bind(`Promise\\.all\\(\\[${id},(${id})\\(\\{scope:`, async () => ({}));
+  if (!split) bind(`Promise\\.all\\(\\[${id},(${id})\\(\\{scope:`, async () => ({}));
   bind(`let ${id}=(${id})\\(${scope},${client}\\)`, () => () => {});
   bind(`==null\\?(${id})\\(${scope},${client},`, () => () => {});
   bind(`(${id})\\(${scope},${id}\\.workHomePolicyAcceptance\\)`, () => {});
@@ -64,13 +64,16 @@ export async function checkProjectSubmit(composer, runtime, expectedFirstTurnErr
     (projectId, assignment) => projectId == null ? assignment : { projectKind: 'local', projectId });
   bind(`workspaceRoots:${id}\\}\\):(${id})\\(\\{hostId:`, () => { throw new Error('意外回退到目录分配'); });
   const paramsHelper = capture(entry, `,${params}=(${id})\\(\\{`);
-  const membershipStart = composer.indexOf('saveThreadProjectAssignment:async(') + 'saveThreadProjectAssignment:'.length;
+  const membershipSources = [composer, ...Object.values(dependencySources)].filter((source) => source.includes('saveThreadProjectAssignment:async('));
+  assert.equal(membershipSources.length, 1, '官方项目归属回调必须唯一');
+  const membershipSource = membershipSources[0];
+  const membershipStart = membershipSource.indexOf('saveThreadProjectAssignment:async(') + 'saveThreadProjectAssignment:'.length;
   assert.ok(membershipStart >= 'saveThreadProjectAssignment:'.length);
   let depth = 0;
   let membershipEnd;
   let quote;
-  for (let cursor = composer.indexOf('=>{', membershipStart) + 2; cursor < composer.length; cursor += 1) {
-    const character = composer[cursor];
+  for (let cursor = membershipSource.indexOf('=>{', membershipStart) + 2; cursor < membershipSource.length; cursor += 1) {
+    const character = membershipSource[cursor];
     if (quote) {
       if (character === '\\') cursor += 1;
       else if (character === quote) quote = undefined;
@@ -79,7 +82,7 @@ export async function checkProjectSubmit(composer, runtime, expectedFirstTurnErr
     else if (character === '}' && --depth === 0) { membershipEnd = cursor; break; }
   }
   assert.ok(membershipEnd > membershipStart);
-  const membership = composer.slice(membershipStart, membershipEnd + 1);
+  const membership = membershipSource.slice(membershipStart, membershipEnd + 1);
   const membershipConnection = capture(membership, `await (${id})\\.setMembership\\(`);
   const membershipScope = capture(membership, `,(${id})!=null`);
   const decisionName = capture(runtime, `async function (${id})\\(\\{environmentCwd:`);
@@ -92,9 +95,22 @@ export async function checkProjectSubmit(composer, runtime, expectedFirstTurnErr
   }));
   const environment = vm.createContext(bindings);
   // Base-parameter conversion is native too, including permissions and attachments.
-  vm.runInContext(functionSource(composer, paramsHelper), environment);
+  let converterSource = composer;
+  let converterName = paramsHelper;
+  if (!composer.includes(`function ${paramsHelper}(`)) {
+    const imports = [...composer.matchAll(/import\{([^}]+)\}from["']\.\/([^"']+)["']/g)]
+      .flatMap((match) => match[1].split(',').map((binding) => ({ file: match[2], parts: binding.trim().split(/\s+as\s+/) })))
+      .filter(({ parts }) => parts.at(-1) === paramsHelper);
+    assert.equal(imports.length, 1, '官方基础参数转换模块必须唯一');
+    const imported = imports[0];
+    converterSource = dependencySources[`webview/assets/${imported.file}`];
+    assert.equal(typeof converterSource, 'string', `缺少官方基础参数转换模块：${imported.file}`);
+    converterName = capture(converterSource, `(?:export\\{|,)(${id}) as ${imported.parts[0]}(?:,|\\})`);
+  }
+  const converter = functionSource(converterSource, converterName);
+  vm.runInContext(converter, environment);
+  environment[paramsHelper] = environment[converterName];
   // Its permission builders are unused when app-server defaults are selected.
-  const converter = functionSource(composer, paramsHelper);
   environment[capture(converter, `let ${id}=(${id})\\(\\[`)] = (items) => items;
   environment[capture(converter, `multiAgentMode:(${id}),`)] = 'explicitRequestOnly';
   environment[capture(converter, `\\.filter\\((${id})\\)`)] = () => false;
