@@ -1,5 +1,5 @@
 import { LayerClient } from './client.mjs';
-import { groupThreads, normalizePath, projectName, routeThreadId, loadAllThreads, ThreadActivity, navigationEdits, overlayNavigationEdits } from './core.mjs';
+import { groupThreads, normalizePath, projectName, routeThreadId, loadAllThreads, ThreadActivity, navigationEdits, overlayNavigationEdits, selectArchiveThreads } from './core.mjs';
 import { ReplyReader } from './reading.mjs';
 import { AgentNavigation } from './agent-navigation.mjs';
 import { AgentOverview } from './agent-overview.mjs';
@@ -410,6 +410,9 @@ class Navigation {
       button.addEventListener('click', () => { this.closeProjectMenu(true); callback(); }); menu.append(button);
     };
     action('复制文件夹路径', 'copy-project-path', () => this.client.request('copy-project-path', { cwd: group.path }).catch((error) => this.showError(error)));
+    action('归档全部聊天…', 'archive-project', () => this.archiveProject(group));
+    menu.lastElementChild.disabled = !!this.batchArchive || !this.hasLoaded || !!this.loading
+      || !selectArchiveThreads(this.threads, group.key).length;
     if (group.registered) action('移除添加记录', 'remove-project', () => this.removeProject(group));
     this.rail.append(menu); this.projectMenu = menu;
     const rect = heading.getBoundingClientRect(), size = menu.getBoundingClientRect();
@@ -437,6 +440,69 @@ class Navigation {
       this.notifyProject(remaining ? '已移除添加记录；该项目仍有聊天、属于当前工作区或保持置顶。' : '已移除添加记录，文件夹和聊天均保留。');
       if (!this.list.contains(document.activeElement) && !this.projectForm.contains(document.activeElement)) this.addProjectButton.focus({ preventScroll: true });
     } catch (error) { if (!this.disposed) this.showError(error); }
+  }
+  async archiveProject(group) {
+    if (this.disposed || this.batchArchive || !this.hasLoaded || this.loading) return;
+    if (document.querySelector('[role="dialog"], [aria-modal="true"]')) {
+      this.showError(new Error('请先完成或关闭当前对话框，再批量归档。')); return;
+    }
+    const threads = selectArchiveThreads(this.threads, group.key).map((thread) => ({ ...thread }));
+    if (!threads.length) return;
+    const batch = { threads, cancelled: false }; this.batchArchive = batch;
+    const confirmed = await this.confirmBatchArchive(group, threads.length);
+    if (!confirmed || this.disposed) {
+      this.batchArchive = null;
+      for (const view of ['active', 'archived']) if (this.cache(view).dirty) this.scheduleRefresh(view);
+      return;
+    }
+    let archived = 0, skipped = 0, failed = 0;
+    const failures = [];
+    for (const thread of threads) {
+      if (this.disposed || batch.cancelled) break;
+      const progress = `正在归档… ${archived + skipped + failed}/${threads.length}`;
+      this.notifyProject(progress);
+      this.projectNotice.append(iconButton('close', '停止归档剩余聊天', () => { batch.cancelled = true; }));
+      const current = this.threads.find((item) => item.id === thread.id);
+      const status = this.activity.statuses.get(thread.id)?.status ?? current?.status;
+      if (!current || ['active', 'running'].includes(status)) { skipped++; continue; }
+      try {
+        const result = await this.bridge.archiveThread(thread);
+        if (result?.skipped) skipped++;
+        else if (result?.archived === true) archived++;
+        else throw new Error('官方归档操作未确认成功');
+      } catch (error) { failed++; failures.push(`${thread.title}：${error.message}`); }
+    }
+    this.batchArchive = null;
+    if (this.disposed) return;
+    const remaining = threads.length - archived - skipped - failed;
+    this.notifyProject(`已归档 ${archived} 条，跳过 ${skipped} 条，失败 ${failed} 条${remaining ? `，未处理 ${remaining} 条` : ''}。`, failed > 0);
+    this.projectNotice.title = failures.join('\n');
+    this.render();
+    for (const view of ['active', 'archived']) if (this.cache(view).dirty) this.scheduleRefresh(view);
+    if (document.activeElement === document.body) this.archiveButton.focus({ preventScroll: true });
+  }
+  confirmBatchArchive(group, count) {
+    return new Promise((resolve) => {
+      const dialog = element('dialog', 'vcl-batch-dialog');
+      dialog.setAttribute('aria-labelledby', 'vcl-batch-title');
+      dialog.setAttribute('aria-describedby', 'vcl-batch-description');
+      const title = element('strong', '', '归档全部聊天'); title.id = 'vcl-batch-title';
+      const description = element('p', '', `将归档“${group.name}”项目的全部 ${count} 条聊天，包含折叠和搜索未显示的聊天。`);
+      description.id = 'vcl-batch-description';
+      const detail = element('p', '', '正在运行、等待交互或关联定时任务的聊天会跳过。归档后可从“已归档聊天”恢复。');
+      const path = element('p', 'vcl-batch-path', group.path || '未分类');
+      const actions = element('div', 'vcl-batch-actions');
+      const cancel = element('button', '', '取消'), confirm = element('button', '', `归档 ${count} 条聊天`);
+      cancel.type = confirm.type = 'button'; confirm.dataset.action = 'confirm-batch-archive';
+      const finish = (value) => {
+        this.cancelBatchConfirmation = null; dialog.close(); dialog.remove(); resolve(value);
+      };
+      cancel.addEventListener('click', () => finish(false)); confirm.addEventListener('click', () => finish(true));
+      dialog.addEventListener('cancel', (event) => { event.preventDefault(); finish(false); });
+      this.cancelBatchConfirmation = () => finish(false);
+      actions.append(cancel, confirm); dialog.append(title, path, description, detail, actions); this.rail.append(dialog);
+      dialog.showModal(); cancel.focus();
+    });
   }
   toggleNavigation() {
     this.closeProjectMenu();
@@ -541,6 +607,7 @@ class Navigation {
   scheduleRefresh(view = this.view) {
     if (this.disposed) return;
     const target = this.cache(view);
+    if (this.batchArchive) { target.dirty = true; return; }
     if (view === 'archived' && this.view !== view) { target.dirty = true; return; }
     if (target.loading) { target.refreshAgain = true; return; }
     if (!target.refreshTimer) target.refreshTimer = setTimeout(() => this.refresh(view), 600);
@@ -906,6 +973,7 @@ class Navigation {
     clearTimeout(this.archiveView.refreshTimer);
     this.closeMenuAnchor();
     this.closeProjectMenu();
+    this.cancelBatchConfirmation?.();
     this.bridge.setReasoningEnabled(false);
     for (const cleanup of this.cleanups) cleanup();
     this.rail?.remove(); document.body.classList.remove('vcl-enabled'); document.body.style.removeProperty('--vcl-rail-width');

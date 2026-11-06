@@ -49,11 +49,17 @@ export function patchThreadMenu(source) {
   const pinShortcut = unique([...body.matchAll(new RegExp(`(${identifier})=(${identifier})==null\\?null:\\(0,${escape(jsx)}\\.jsx\\)\\((${identifier}),\\{enabled:`, 'g'))], '置顶快捷键组件');
   body = body.replace(pinShortcut[0], `${pinShortcut[1]}=${pinShortcut[2]}==null||__vclLayerMenu?null:(0,${jsx}.jsx)(${pinShortcut[3]},{enabled:`);
   const react = unique([...body.matchAll(new RegExp(`\\(0,(${identifier})\\.useState\\)\\(null\\)`, 'g'))].slice(0, 1), '菜单 React 状态')[1];
+  const active = unique([...body.matchAll(new RegExp(`${identifier}\\((${identifier}),${identifier}\\)\\?\\.type===\`active\``, 'g'))], '归档运行状态')[1];
+  const restricted = unique([...body.matchAll(new RegExp(`if\\(${identifier}\\.get\\((${identifier}),\\{hostId:${identifier},threadId:${identifier}\\}\\)\\)\\{`, 'g'))], '归档受限聊天')[1];
+  const automation = unique([...body.matchAll(new RegExp(`await (${identifier})\\((\`list-automations\`)?\\);${identifier}=(${identifier})\\(\\{automations:`, 'g'))], '归档关联任务检查');
+  const batch = { active: imported(source, active), restricted: imported(source, restricted),
+    automations: imported(source, automation[1]), matchAutomation: imported(source, automation[3]),
+    automationCommand: !!automation[2] };
   // Hook-free metadata lets the header mount this component within native providers.
   return { content: source.slice(0, signature.index) + body + source.slice(end + 1), component: signature[1],
     initializer: exportName(source, unique([...source.matchAll(new RegExp(`function (${identifier})\\(\\)\\{return\\(\\1=${identifier}\\(\\(\\(\\)=>\\{[^{}]*${escape(react)}=(${identifier})\\(\\)`, 'g'))], '菜单初始化函数')[1]),
     react: imported(source, unique([...source.matchAll(new RegExp(`${escape(react)}=(${identifier})\\(\\)`, 'g'))], 'React 依赖')[1]),
-    jsx: imported(source, unique([...source.matchAll(new RegExp(`${escape(jsx)}=(${identifier})\\(\\)`, 'g'))], 'JSX 依赖')[1]) };
+    jsx: imported(source, unique([...source.matchAll(new RegExp(`${escape(jsx)}=(${identifier})\\(\\)`, 'g'))], 'JSX 依赖')[1]), batch };
 }
 
 export function archiveDependencies(source) {
@@ -78,7 +84,10 @@ export function patchMenuHeader(source, { menuPath, menu, dom, archive }) {
     + `import{${archive.initializer} as __vclArchiveInit}from"./${path.basename(archive.path)}";`
     + Object.entries({ scope: '__vclArchiveScope', scopeAtom: '__vclArchiveScopeAtom', service: '__vclArchiveService',
       pins: '__vclArchivePins', openError: '__vclArchiveOpenError' }).map(([key, alias]) =>
-      `import{${archive[key].exported} as ${alias}}from"${archive[key].file}";`).join('');
+      `import{${archive[key].exported} as ${alias}}from"${archive[key].file}";`).join('')
+    + Object.entries({ active: '__vclArchiveActive', restricted: '__vclArchiveRestricted',
+      automations: '__vclArchiveAutomations', matchAutomation: '__vclArchiveMatchAutomation' }).map(([key, alias]) =>
+      `import{${menu.batch[key].exported} as ${alias}}from"${menu.batch[key].file}";`).join('');
   const wrapper = `let __vclMenuBoundary;function __vclMenuOff(){return null}function __vclMenuNoop(){return()=>{}}`
     + `function __vclMenuPortal(){let R=__vclReact(),J=__vclJsx(),bridge=globalThis.__vscodexLayerBridge,surface=R.useRef({}).current;`
     + `R.useEffect(()=>bridge?.registerThreadMenuSurface(surface),[bridge,surface]);`
@@ -90,8 +99,22 @@ export function patchMenuHeader(source, { menuPath, menu, dom, archive }) {
     + `return __vclDom().createPortal(J.jsx(__vclMenuBoundary,{token:target.token,children:J.jsx(__vclMenu,{__vclLayerMenu:true,__vclMenuToken:target.token,conversationId:target.thread.id,hostId:target.thread.hostId,`
     + `cwd:target.thread.cwd,title:target.thread.title,canPin:false,archiveNavigation:"stay",archiveSource:"vscodex_layer",`
     + `triggerButtonClassName:"vcl-native-menu-trigger"},target.thread.id)},target.token),target.container);}`
-    + `function __vclArchiveActions(){__vclArchiveInit();let R=__vclReact(),scope=__vclArchiveScope(__vclArchiveScopeAtom),surface=R.useRef({}).current;`
-    + `R.useEffect(()=>globalThis.__vscodexLayerBridge?.registerArchiveActions(surface,{restore:async target=>{`
+    + `function __vclArchiveActions(){__vclArchiveInit();__vclMenuInit();let R=__vclReact(),scope=__vclArchiveScope(__vclArchiveScopeAtom),surface=R.useRef({}).current;`
+    + `R.useEffect(()=>globalThis.__vscodexLayerBridge?.registerArchiveActions(surface,{archive:async target=>{`
+    + `let service=__vclArchiveService(scope,"local"),busy=()=>scope.get(__vclArchiveActive,target.id)?.type==="active"`
+    + `||scope.get(__vclArchiveRestricted,{hostId:"local",threadId:target.id});`
+    + `if(busy())return{skipped:true};`
+    + `let tasks=await __vclArchiveAutomations(${menu.batch.automationCommand ? '"list-automations"' : ''});`
+    + `if(__vclArchiveMatchAutomation({automations:tasks.items,conversationId:target.id,includePausedAutomations:true}))return{skipped:true};`
+    + `await service.hydrateBackgroundThreads([target.id]);`
+    + `if(!service.getConversation(target.id))throw new Error("未能加载聊天，未执行归档。");`
+    + `let result=await service.readThread(target.id,{includeTurns:false});`
+    + `if(result.thread?.id!==target.id)throw new Error("聊天信息不一致，未执行归档。");`
+    + `if(busy()||["active","running"].includes(result.thread.status?.type))return{skipped:true};`
+    + `await service.archiveConversation(target.id,{useAppServerPins:scope.get(__vclArchivePins),cleanupWorktree:false,source:"vscodex_layer_batch"});`
+    + `globalThis.__vscodexLayerBridge?.threadArchived(target.id);`
+    + `scope.queryClient.invalidateQueries({queryKey:["archived-threads"]}).catch(()=>{});return{archived:true};`
+    + `},restore:async target=>{`
     + `try{await __vclArchiveService(scope,"local").unarchiveConversation(target.id,{useAppServerPins:scope.get(__vclArchivePins)})}`
     + `catch(error){if(!(${archive.openErrorKind === 'predicate' ? '__vclArchiveOpenError(error)' : 'error instanceof __vclArchiveOpenError'}))throw error;return{restored:true,openable:false}}`
     + `finally{scope.queryClient.invalidateQueries({queryKey:["archived-threads"]}).catch(()=>{})}`

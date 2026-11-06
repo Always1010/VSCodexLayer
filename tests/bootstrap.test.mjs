@@ -89,6 +89,18 @@ test('官方仅获取一次 API，草稿状态原样透传，路由观察错误�
   unsubscribeArchived(); bridge.threadArchived('current'); assert.equal(archived, 'other');
   releaseMenu(); assert.equal(bridge.threadMenuTarget(), null);
   await assert.rejects(bridge.restoreArchivedThread({ id: 'saved' }), /尚未就绪/);
+  await assert.rejects(bridge.archiveThread({ id: 'saved' }), /尚未就绪/);
+  const archivedTargets = [];
+  const releaseBatch = bridge.registerArchiveActions({}, { archive: async (target) => {
+    archivedTargets.push(target.id); return { archived: true };
+  } });
+  const batchTarget = { id: 'saved' };
+  const archiving = bridge.archiveThread(batchTarget); batchTarget.id = 'changed';
+  assert.equal((await archiving).archived, true);
+  assert.deepEqual(archivedTargets, ['saved']);
+  await assert.rejects(bridge.archiveThread({ id: '../invalid' }), /编号无效/);
+  releaseBatch();
+  await assert.rejects(bridge.archiveThread({ id: 'saved' }), /尚未就绪/);
   const restoredTargets = [];
   const removeArchiveActions = bridge.registerArchiveActions({}, { restore: async (target) => {
     restoredTargets.push(target); return { restored: true };

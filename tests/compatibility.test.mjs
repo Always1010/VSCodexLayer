@@ -58,10 +58,11 @@ test('菜单桥导入核对实际导出，阻止归档模块缺少导出导致�
     + 'function footer(){let store=scope(atom);await service(store,host).unarchiveConversation(id,{useAppServerPins:store.get(pins)});'
     + 'error instanceof OpenError}export{B as n,footer as t};';
   const options = { menuPath: 'menu.js', menu: { initializer: 'n', componentExport: 't',
+    batch: Object.fromEntries(['active', 'restricted', 'automations', 'matchAutomation'].map((key) => [key, { exported: key, file: './native.js' }])),
     react: { exported: 'react', file: './native.js' }, jsx: { exported: 'jsx', file: './native.js' } },
     dom: { exported: 'dom', file: './native.js' }, archive: { path: 'archive.js', ...archiveDependencies(archiveSource) } };
   const modules = { './menu.js': 'export{init as n,menu as t};', './archive.js': archiveSource,
-    './native.js': 'export{scope as a,atom as b,service as c,pins as d,OpenError as e,R as react,J as jsx,D as dom};' };
+    './native.js': 'export{scope as a,atom as b,service as c,pins as d,OpenError as e,R as react,J as jsx,D as dom,active,restricted,automations,matchAutomation};' };
   const read = async (file) => { assert.ok(file in modules); return modules[file]; };
   const header = patchMenuHeader('function header(){}export{header as t};', options);
   await validateHeaderImports(header, read);

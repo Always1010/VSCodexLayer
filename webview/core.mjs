@@ -93,6 +93,11 @@ export function routeThreadId(route) {
   return match?.[1] ?? null;
 }
 
+// Use the complete project list, independent of search and the five-row preview.
+export function selectArchiveThreads(threads, projectKey) {
+  return groupThreads(threads).find((group) => group.key === projectKey)?.threads ?? [];
+}
+
 export function navigationEdits(before, after) {
   const edits = [];
   for (const key of ['mode', 'width', 'collapsed', 'disabled']) {

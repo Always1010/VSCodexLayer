@@ -155,21 +155,27 @@ export async function checkNativeChatMenu(plan) {
   assert.equal(portal.node.props.children.props.archiveNavigation, 'stay');
 
   // Execute the generated restoration bridge inside the same native providers.
-  const restored = [], invalidated = [], cleanup = [];
+  const restored = [], invalidated = [], cleanup = [], batchArchived = [];
   let restoreError;
+  let batchBusy = false, batchAutomation = false, batchError, batchLoaded = true, batchReadBusy = false;
+  const activeStatus = {}, restrictedStatus = {};
   class OpenError extends Error {}
   const pins = {};
-  const nativeScope = { get: (atom) => { assert.equal(atom, pins); return true; },
+  const nativeScope = { get: (atom) => atom === pins ? true : atom === activeStatus && batchBusy ? { type: 'active' } : null,
     queryClient: { invalidateQueries: async (options) => { invalidated.push(options.queryKey); } } };
   const archiveContext = vm.createContext({
     __vclReact: () => ({ useRef: () => ({ current: surface }), useEffect: (callback) => cleanup.push(callback()) }),
-    __vclArchiveInit() {}, __vclArchiveScope: () => nativeScope, __vclArchiveScopeAtom: {},
+    __vclArchiveInit() {}, __vclMenuInit() {}, __vclArchiveScope: () => nativeScope, __vclArchiveScopeAtom: {},
     __vclArchiveService: (scope, hostId) => {
       assert.equal(scope, nativeScope); assert.equal(hostId, 'local');
       return { async unarchiveConversation(id, options) {
         restored.push({ id, options }); if (restoreError) throw restoreError;
-      } };
+      }, async hydrateBackgroundThreads() {}, getConversation: () => batchLoaded ? {} : null,
+      async readThread(id) { return { thread: { id, status: { type: batchReadBusy ? 'active' : 'idle' } } }; },
+      async archiveConversation(id, options) { if (batchError) throw batchError; batchArchived.push({ id, options }); } };
     },
+    __vclArchiveActive: activeStatus, __vclArchiveRestricted: restrictedStatus,
+    __vclArchiveAutomations: async () => ({ items: [] }), __vclArchiveMatchAutomation: () => batchAutomation,
     __vclArchivePins: pins, __vclArchiveOpenError: plan.compatibility.chatMenu.archive.openErrorKind === 'predicate'
       ? (error) => error instanceof OpenError : OpenError,
     globalThis: { __vscodexLayerBridge: context.__vscodexLayerBridge },
@@ -185,6 +191,24 @@ export async function checkNativeChatMenu(plan) {
   const partial = await context.__vscodexLayerBridge.restoreArchivedThread({ id: 'partial' });
   assert.equal(partial.restored, true); assert.equal(partial.openable, false);
   assert.equal(invalidated.length, 3, '成功、失败和部分恢复后都刷新原生归档缓存');
+  archived = undefined;
+  assert.equal((await context.__vscodexLayerBridge.archiveThread({ id: 'batch' })).archived, true);
+  assert.equal(batchArchived[0].id, 'batch');
+  assert.equal(batchArchived[0].options.useAppServerPins, true);
+  assert.equal(batchArchived[0].options.cleanupWorktree, false, '批量归档不清理工作树');
+  assert.equal(archived, 'batch', '成功后才移除导航条目');
+  batchBusy = true;
+  assert.equal((await context.__vscodexLayerBridge.archiveThread({ id: 'running' })).skipped, true);
+  batchBusy = false; batchAutomation = true;
+  assert.equal((await context.__vscodexLayerBridge.archiveThread({ id: 'scheduled' })).skipped, true);
+  batchAutomation = false; batchReadBusy = true;
+  assert.equal((await context.__vscodexLayerBridge.archiveThread({ id: 'changed-status' })).skipped, true);
+  batchReadBusy = false; batchLoaded = false;
+  await assert.rejects(context.__vscodexLayerBridge.archiveThread({ id: 'unloaded' }), /未能加载聊天/);
+  batchLoaded = true; batchError = new Error('归档失败');
+  await assert.rejects(context.__vscodexLayerBridge.archiveThread({ id: 'failed' }), /归档失败/);
+  assert.equal(batchArchived.length, 1, '运行中、关联任务、读取失败及归档失败不能计为成功');
+  assert.equal(archived, 'batch', '失败不能移除导航条目');
   cleanup[0]();
   await assert.rejects(context.__vscodexLayerBridge.restoreArchivedThread({ id: 'saved' }), /尚未就绪/);
 }

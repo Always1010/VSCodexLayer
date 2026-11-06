@@ -14,7 +14,8 @@ const activityOnly = process.argv.length === 3 && process.argv[2] === '--activit
 const agentsOnly = process.argv.length === 3 && process.argv[2] === '--agents';
 const moreOnly = process.argv.length === 3 && process.argv[2] === '--more';
 const deleteOnly = process.argv.length === 3 && process.argv[2] === '--delete';
-if (process.argv.length > 2 && !readingOnly && !reasoningOnly && !archiveOnly && !listOnly && !activityOnly && !agentsOnly && !moreOnly && !deleteOnly) throw new Error('用法：node tools/check-ui.mjs [--reading|--reasoning|--archive|--list|--activity|--agents|--more|--delete]');
+const batchArchiveOnly = process.argv.length === 3 && process.argv[2] === '--batch-archive';
+if (process.argv.length > 2 && !readingOnly && !reasoningOnly && !archiveOnly && !listOnly && !activityOnly && !agentsOnly && !moreOnly && !deleteOnly && !batchArchiveOnly) throw new Error('用法：node tools/check-ui.mjs [--reading|--reasoning|--archive|--list|--activity|--agents|--more|--delete|--batch-archive]');
 const output = path.join(root, '.scratch', 'ui');
 await fs.mkdir(output, { recursive: true });
 const executable = [
@@ -105,7 +106,14 @@ window.mockArchivedThreads=Array.from({length:61},(_,index)=>({id:'archived-'+in
 cwd:index<5?'D:/WRK/VSCodexLayer':index===60?null:'D:/Archive/Project',createdAt:1000+index,updatedAt:2000+index}));
 window.mockArchiveListFailure=false;window.mockHoldView=null;window.mockHeldLists=[];
 window.mockRestoreCalls=[];window.mockRestoreFailure=false;window.mockRestoreOpenError=false;window.mockHoldRestore=false;
-__vscodexLayerBridge.registerArchiveActions({}, {restore:async target=>{
+window.mockBatchCalls=[];window.mockBatchFailures=new Set();window.mockBatchSkips=new Set();window.mockHoldBatch=false;
+__vscodexLayerBridge.registerArchiveActions({}, {archive:async target=>{
+mockBatchCalls.push(target.id);if(mockHoldBatch)await new Promise(resolve=>window.finishBatch=resolve);
+if(mockBatchSkips.has(target.id))return{skipped:true};if(mockBatchFailures.has(target.id))throw Error('模拟归档失败');
+const thread=mockThreads.find(t=>t.id===target.id);if(!thread)throw Error('聊天不存在');
+mockArchivedThreads.push(thread);mockThreads=mockThreads.filter(t=>t.id!==target.id);__vscodexLayerBridge.threadArchived(target.id);
+return{archived:true}
+},restore:async target=>{
 mockRestoreCalls.push(target.id);if(mockHoldRestore)await new Promise(resolve=>window.finishRestore=resolve);
 if(mockRestoreFailure)throw Error('原生恢复失败');
 const thread=mockArchivedThreads.find(thread=>thread.id===target.id);if(thread){mockThreads.push(thread);mockArchivedThreads=mockArchivedThreads.filter(thread=>thread.id!==target.id)}
@@ -215,7 +223,7 @@ try {
   await send('Emulation.setDeviceMetricsOverride', { width: 1100, height: 800, deviceScaleFactor: 1, mobile: false }, sessionId);
   await send('Page.navigate', { url: address }, sessionId);
   await waitFor(`document.querySelector('.vcl-count')?.textContent.includes('63 个聊天')`);
-  if (!moreOnly) {
+  if (!moreOnly && !batchArchiveOnly) {
     // Existing scenarios exercise the complete list; --more covers the default five-row view.
     await evaluate(`window.expandAllProjects=()=>{
       for(const key of [...document.querySelectorAll('.vcl-show-more[aria-expanded="false"]')].map(node=>node.dataset.vclKey)){
@@ -223,7 +231,45 @@ try {
       }
     };expandAllProjects()`);
   }
-  if (deleteOnly) {
+  if (batchArchiveOnly) {
+    await evaluate(`window.openProjectArchive=key=>{
+      document.querySelector('[data-vcl-key="project:'+key+'"]').dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,cancelable:true}));
+      document.querySelector('[data-action="archive-project"]').click()
+    };mockNavigate('/local/thread-5');document.getElementById('native-composer').value='当前聊天草稿';
+    document.querySelector('.vcl-input').value='其他项目聊天 2';document.querySelector('.vcl-input').dispatchEvent(new Event('input'));
+    openProjectArchive('d:/wrk/project')`);
+    await waitFor(`document.querySelector('dialog[open]')`);
+    await assertBrowser(`document.getElementById('vcl-batch-description').textContent.includes('30 条')&&mockBatchCalls.length===0&&mockRoute==='/local/thread-5'`, '搜索或五条限制改变项目范围，或确认前已执行');
+    await evaluate(`document.querySelector('dialog').dispatchEvent(new Event('cancel',{cancelable:true}))`);
+    await assertBrowser(`!document.querySelector('dialog')&&mockBatchCalls.length===0`, '取消仍执行归档');
+    await evaluate(`mockThreads.find(t=>t.id==='thread-10').status='active';mockBatchSkips.add('thread-11');mockBatchFailures.add('thread-12');
+      window.postMessage({type:'vscodex-layer/event',event:{type:'thread-activity',threadId:'thread-10',status:'active',phase:'status'}},location.origin);
+      new Promise(resolve=>setTimeout(resolve,0))`);
+    await evaluate(`mockHoldBatch=true;openProjectArchive('d:/wrk/project');document.querySelector('[data-action="confirm-batch-archive"]').click()`);
+    await waitFor(`mockBatchCalls.length===1`);
+    await evaluate(`openProjectArchive('d:/wrk/project')`);
+    await assertBrowser(`document.querySelector('[data-action="archive-project"]').disabled&&!document.querySelector('dialog')&&mockBatchCalls.length===1`, '批量处理中可重复启动');
+    await evaluate(`document.querySelector('.vcl-project-menu').dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}))`);
+    await evaluate(`mockThreads.unshift({id:'new-during-batch',title:'批次开始后新建',cwd:'D:/WRK/Project',createdAt:9999});
+      mockHoldBatch=false;finishBatch()`);
+    await waitFor(`document.querySelector('.vcl-project-notice').textContent.includes('已归档 27 条，跳过 2 条，失败 1 条')`);
+    await assertBrowser(`mockBatchCalls.length===29&&!mockBatchCalls.includes('thread-10')&&!mockBatchCalls.includes('new-during-batch')
+      &&mockThreads.some(t=>t.id==='thread-12')&&mockThreads.filter(t=>t.cwd==='D:/Other/Project').length===25
+      &&mockRoute==='/local/thread-5'&&document.getElementById('native-composer').value==='当前聊天草稿'`, '批次范围漂移、跨项目、失败移除或当前聊天受影响');
+    await evaluate(`document.querySelector('.vcl-input').value='';document.querySelector('.vcl-input').dispatchEvent(new Event('input'));
+      mockNavigate('/local/thread-5');openProjectArchive('d:/wrk/vscodexlayer');
+      document.querySelector('[data-action="confirm-batch-archive"]').click()`);
+    await waitFor(`document.querySelector('.vcl-project-notice').textContent.includes('已归档 7 条，跳过 1 条')`);
+    await assertBrowser(`mockRoute==='/'&&mockThreads.filter(t=>t.cwd==='D:/WRK/VSCodexLayer').length===1`, '归档当前聊天未返回草稿或遗漏五条之外的聊天');
+    await waitFor(`!document.querySelector('[aria-label="刷新聊天列表"]').disabled`);
+    await evaluate(`window.beforeStop=mockBatchCalls.length;mockHoldBatch=true;openProjectArchive('d:/other/project');
+      document.querySelector('[data-action="confirm-batch-archive"]').click()`);
+    await waitFor(`mockBatchCalls.length===beforeStop+1`);
+    await evaluate(`document.querySelector('[aria-label="停止归档剩余聊天"]').click();mockHoldBatch=false;finishBatch()`);
+    await waitFor(`document.querySelector('.vcl-project-notice').textContent.includes('未处理 24 条')`);
+    await assertBrowser(`mockBatchCalls.length===beforeStop+1&&mockThreads.filter(t=>t.cwd==='D:/Other/Project').length===24`, '停止后仍归档剩余聊天');
+    console.log('项目批量归档无头检查通过：完整范围、搜索与折叠隐藏项、确认取消、运行及关联任务跳过、部分失败保留、批次快照、项目隔离和当前聊天返回草稿。');
+  } else if (deleteOnly) {
     await evaluate(`mockDrafts['/']='保留首页草稿';mockDrafts[mockDraftKey('/?vclProjectCwd=D%3A%2FWRK%2FVSCodexLayer')]='保留项目草稿';
       mockNavigate('/?vclProjectCwd=D%3A%2FWRK%2FVSCodexLayer')`);
     await waitFor(`document.querySelector('.vcl-project-context').textContent.includes('新聊天')`);

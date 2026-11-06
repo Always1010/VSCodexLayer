@@ -140,6 +140,15 @@
       archiveActions.set(surface, actions);
       return () => archiveActions.delete(surface);
     },
+    archiveThread(thread) {
+      if (!thread || typeof thread.id !== 'string' || !/^[\w-]{1,200}$/.test(thread.id)) {
+        return Promise.reject(new Error('聊天编号无效。'));
+      }
+      const actions = [...archiveActions.values()].find((value) => typeof value.archive === 'function');
+      if (!actions) return Promise.reject(new Error('官方批量归档操作尚未就绪，请更新增强补丁后重试。'));
+      const target = { id: thread.id };
+      return Promise.resolve().then(() => actions.archive(target));
+    },
     restoreArchivedThread(thread) {
       if (!thread || typeof thread.id !== 'string' || !/^[\w-]{1,200}$/.test(thread.id)) {
         return Promise.reject(new Error('聊天编号无效。'));

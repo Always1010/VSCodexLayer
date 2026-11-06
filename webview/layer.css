@@ -124,6 +124,13 @@ body.vcl-agents-pinned > #root { right: 390px !important; }
 #vcl-navigation .vcl-project-menu { position: fixed; width: 210px; max-width: calc(100vw - 8px); z-index: 100; padding: 4px; border: 1px solid var(--vcl-border); border-radius: 6px; background: var(--vscode-menu-background, var(--vscode-sideBar-background, #f8f8f8)); box-shadow: 0 2px 8px #0003; }
 #vcl-navigation .vcl-project-menu button { display: block; width: 100%; min-height: 30px; padding: 5px 8px; border: 0; border-radius: 3px; text-align: left; background: transparent; }
 #vcl-navigation .vcl-project-menu button:hover, #vcl-navigation .vcl-project-menu button:focus { background: var(--vcl-hover); }
+#vcl-navigation .vcl-project-menu button:disabled { opacity: .5; }
+#vcl-navigation .vcl-batch-dialog { box-sizing: border-box; width: min(460px, calc(100vw - 24px)); padding: 18px; border: 1px solid var(--vcl-border); border-radius: 8px; color: var(--vscode-foreground, #333); background: var(--vscode-editor-background, #fff); }
+#vcl-navigation .vcl-batch-dialog::backdrop { background: #0006; }
+#vcl-navigation .vcl-batch-path { overflow-wrap: anywhere; opacity: .7; }
+#vcl-navigation .vcl-batch-actions { display: flex; justify-content: flex-end; gap: 8px; }
+#vcl-navigation .vcl-batch-actions button { padding: 5px 10px; border: 1px solid var(--vcl-border); border-radius: 4px; color: inherit; background: var(--vcl-hover); }
+#vcl-navigation .vcl-batch-actions button[data-action="confirm-batch-archive"] { color: var(--vscode-button-foreground, #fff); background: var(--vscode-button-background, #007acc); }
 #vcl-navigation .vcl-located { animation: vcl-locate 1.8s ease-out; }
 @keyframes vcl-locate { from { box-shadow: inset 0 0 0 1px var(--vscode-focusBorder, #007acc); } to { box-shadow: inset 0 0 0 1px transparent; } }
 @media (prefers-reduced-motion: reduce) { #vcl-navigation .vcl-located { animation: none; outline: 1px solid var(--vscode-focusBorder, #007acc); } }

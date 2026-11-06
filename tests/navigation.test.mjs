@@ -2,8 +2,16 @@ import fs from 'node:fs/promises';
 import vm from 'node:vm';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { normalizePath, projectName, groupThreads, routeThreadId, loadAllThreads, ThreadActivity, navigationEdits, overlayNavigationEdits } from '../webview/core.mjs';
+import { normalizePath, projectName, groupThreads, routeThreadId, loadAllThreads, ThreadActivity, navigationEdits, overlayNavigationEdits, selectArchiveThreads } from '../webview/core.mjs';
 import { AgentNavigation } from '../webview/agent-navigation.mjs';
+
+test('批量归档使用项目完整列表和固定顺序，隔离同名目录', () => {
+  const threads = Array.from({ length: 8 }, (_, index) => ({ id: `t${index}`, cwd: 'D:/A/Project', title: `聊天 ${index}`, createdAt: index + 1 }));
+  threads.push({ id: 'other', cwd: 'D:/B/Project', title: '其他项目', createdAt: 100 });
+  assert.deepEqual(selectArchiveThreads(threads, normalizePath('D:/A/Project')).map((thread) => thread.id),
+    ['t7', 't6', 't5', 't4', 't3', 't2', 't1', 't0']);
+  assert.deepEqual(selectArchiveThreads(threads, '/missing'), []);
+});
 
 test('切换聊天后迟到的父关系不会覆盖新聊天，销毁后不绘制返回入口', async () => {
   const pending = new Map(), rendered = [];
