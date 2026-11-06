@@ -237,6 +237,37 @@ async function navigationFixture(client, timers = { setTimeout, clearTimeout }) 
   return nav;
 }
 
+test('项目全部已读包含隐藏聊天，隔离完整路径及待处理状态，保留点击后新轮次', async () => {
+  const threads = Array.from({ length: 8 }, (_, index) => ({
+    id: `chat-${index}`, cwd: index === 7 ? '/other/Project' : '/work/Project', title: `聊天 ${index}`, status: 'idle',
+  }));
+  let remote = { revision: 1, mode: 'all', width: 250, groups: ['/work/Project'], pinnedProjects: [],
+    unread: threads.map(({ id }) => id), unreadTurns: Object.fromEntries(threads.map(({ id }) => [id, 'old-turn'])) };
+  const requests = [];
+  const nav = await navigationFixture({ async request(method, params) {
+    assert.equal(method, 'save-state'); requests.push(params.operations);
+    // A different panel finishes a new turn after the click but before this save.
+    remote = { ...remote, unreadTurns: { ...remote.unreadTurns, 'chat-0': 'new-turn' } };
+    remote = { ...overlayNavigationEdits(remote, params.operations), revision: remote.revision + 1 };
+    return { state: remote };
+  } }, { setTimeout: () => 1, clearTimeout() {} });
+  nav.threads = threads; nav.query = '聊天 6'; nav.active = 'chat-7';
+  nav.notifyProject = (message) => { nav.notice = message; }; nav.applyState(remote);
+  nav.activity.statuses.set('chat-1', { status: 'active', activeFlags: ['waitingOnApproval'] });
+  nav.activity.statuses.set('chat-2', { status: 'active', activeFlags: ['waitingOnUserInput'] });
+  nav.activity.statuses.set('chat-3', { status: 'systemError' });
+  assert.deepEqual(Array.from(nav.projectUnreadThreads('/work/Project'), ({ id }) => id), ['chat-0', 'chat-4', 'chat-5', 'chat-6']);
+  await nav.acknowledgeProject({ key: '/work/Project', name: 'Project' });
+  assert.deepEqual(remote.unread, ['chat-0', 'chat-1', 'chat-2', 'chat-3', 'chat-7']);
+  assert.equal(requests.length, 1, '一次批量保存，不逐条请求');
+  assert.ok(requests[0].every((edit) => edit.type === 'acknowledge' && edit.turnToken === 'old-turn'));
+  assert.equal(nav.active, 'chat-7'); assert.equal(nav.query, '聊天 6');
+  assert.ok(nav.closed.has('/work/Project')); assert.match(nav.notice, /4 条结束提醒/);
+  nav.view = 'archived';
+  await nav.acknowledgeProject({ key: '/work/Project', name: 'Project' });
+  assert.equal(requests.length, 1, '归档视图不修改普通未读');
+});
+
 test('前端只提交具体操作，广播保留待提交修改，失败重试及旧轮次保护', async () => {
   let remote = { revision: 0, mode: 'all', width: 250, groups: [], pinnedProjects: [], unread: [], unreadTurns: {} };
   let fail = true;

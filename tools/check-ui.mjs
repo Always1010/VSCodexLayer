@@ -51,7 +51,7 @@ else if(message.method==='list'){const first=message.params.cursor==null;const l
 else if(message.method==='ancestry'){const id=message.params.threadId;result={thread:structuredClone(mockThreads.find(t=>t.id===id)??mockAgents?.find(t=>t.id===id)??{id,title:'子聊天'}),ancestors:id==='agent-nested'?[mockAgents[0],mockThreads.find(t=>t.id==='thread-0')]:id.startsWith('agent-')?[mockThreads.find(t=>t.id==='thread-0')]:[],complete:true}}
 else if(message.method==='agent-page'){if(window.mockAgentsError)error='子 Agent 列表读取失败';else{const all=window.mockAgents??[];result={data:message.params.archived?[]:structuredClone(all.slice(message.params.cursor?1:0,message.params.cursor?undefined:1)),nextCursor:!message.params.archived&&!message.params.cursor&&all.length>1?'agents-page2':null}}}
 else if(message.method==='agent-history')result={thread:{id:message.params.threadId},turns:structuredClone(window.mockAgentHistory?.[message.params.threadId]??[])};
-else if(message.method==='save-state'){mockState=mockApplyOperations(mockState,message.params.operations);mockState.revision++;result={saved:true,state:structuredClone(mockState)};window.postMessage({type:'vscodex-layer/event',event:{type:'navigation-state-changed',state:structuredClone(mockState)}},location.origin)}
+else if(message.method==='save-state'){if(window.mockStateSaveFailure)error='已读保存失败';else{mockState=mockApplyOperations(mockState,message.params.operations);mockState.revision++;result={saved:true,state:structuredClone(mockState)};window.postMessage({type:'vscodex-layer/event',event:{type:'navigation-state-changed',state:structuredClone(mockState)}},location.origin)}}
 else if(message.method==='navigate'){mockNavigate(message.params.path??'/local/'+message.params.threadId);result={threadId:message.params.threadId}}
 else if(message.method==='validate-project'){if(mockUnavailable.has(message.params.cwd))error='项目目录不存在或无法访问';else result={cwd:message.params.cwd}}
 else if(message.method==='new-project-chat'){if(mockCannotOpen||mockUnavailable.has(message.params.cwd))error='项目目录不存在或无法访问';else{const path=message.params.path+'?vclProjectCwd='+encodeURIComponent(message.params.cwd);mockNavigate(path);result={path,cwd:message.params.cwd}}}
@@ -471,11 +471,53 @@ try {
     await waitFor(`mockRoute==='/local/thread-2'`);
     await evaluate(`projectHeading().click()`);
     await assertBrowser(`projectHeading().querySelector('.vcl-attention')`, '查看误清除折叠目录中的审批提醒');
+    await evaluate(`window.projectReadAll=()=>document.querySelector('[data-vcl-key="read-all:d:/wrk/vscodexlayer"]');
+      window.routeBeforeReadAll=mockRoute;
+      emitActivity('thread-0','started','active');emitActivity('thread-0','completed');
+      emitActivity('thread-1','started','active');emitActivity('thread-1','completed');
+      emitActivity('thread-3','completed','systemError');
+      emitActivity('thread-4','completed','active',['waitingOnUserInput']);
+      emitActivity('thread-5','started','active');emitActivity('thread-8','completed')`);
+    await waitFor(`projectReadAll()&&mockState.unread.includes('thread-8')`);
+    await evaluate(`{const separator=document.querySelector('[role=separator]');
+      for(let i=0;i<7;i++)separator.dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowLeft',bubbles:true}))}`);
+    await evaluate(`projectHeading().focus()`);
+    await assertBrowser(`projectReadAll().getBoundingClientRect().right<=document.getElementById('vcl-navigation').getBoundingClientRect().right
+      &&(projectHeading().getBoundingClientRect().bottom<=projectReadAll().getBoundingClientRect().top
+        ||projectHeading().lastElementChild.getBoundingClientRect().right<=projectReadAll().getBoundingClientRect().left)`, '窄导航下全部已读按钮溢出或遮住项目状态');
+    await evaluate(`{const separator=document.querySelector('[role=separator]');
+      for(let i=0;i<7;i++)separator.dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowRight',bubbles:true}))}`);
+    await evaluate(`projectHeading().focus()`);
+    await assertBrowser(`getComputedStyle(projectReadAll()).opacity==='1'&&projectReadAll().getAttribute('aria-label').includes('全部标为已读')`, '键盘聚焦未显示全部已读按钮或缺少无障碍名称');
+    await evaluate(`window.mockStateSaveFailure=true;projectReadAll().focus();projectReadAll().click()`);
+    await waitFor(`document.querySelector('.vcl-project-notice.vcl-error button')`);
+    await assertBrowser(`mockRoute===routeBeforeReadAll&&projectHeading().getAttribute('aria-expanded')==='false'
+      &&projectHeading().querySelector('.vcl-running')&&projectHeading().querySelector('.vcl-attention')
+      &&mockState.unread.includes('thread-1')`, '批量已读切换聊天、展开项目、清除运行或未持久化状态提前改变');
+    await evaluate(`emitActivity('thread-0','started','active');emitActivity('thread-0','completed');emitActivity('thread-6','completed')`);
+    await waitFor(`projectReadAll()`);
+    await evaluate(`window.mockStateSaveFailure=false;document.querySelector('.vcl-project-notice button').click()`);
+    await waitFor(`document.querySelector('.vcl-project-notice').textContent.includes('2 条结束提醒')`);
+    await assertBrowser(`mockState.unread.includes('thread-0')&&mockState.unread.includes('thread-6')&&!mockState.unread.includes('thread-1')
+      &&mockState.unread.includes('thread-3')&&mockState.unread.includes('thread-4')&&mockState.unread.includes('thread-8')`, '失败重试误清除新轮次、待处理状态或其他项目提醒');
+    await evaluate(`{const search=document.getElementById('vcl-navigation').querySelector('input[type="search"]');
+      search.value='VSCodexLayer 聊天 8';search.dispatchEvent(new Event('input',{bubbles:true}))}`);
+    await assertBrowser(`projectReadAll()&&!document.querySelector('[data-vcl-key="thread:thread-0"]')
+      &&!document.querySelector('[data-vcl-key="thread:thread-6"]')`, '搜索隐藏未读后缺少项目批量入口');
+    await evaluate(`projectReadAll().focus();projectReadAll().click()`);
+    await waitFor(`!mockState.unread.includes('thread-0')&&!mockState.unread.includes('thread-6')`);
+    await assertBrowser(`!projectReadAll()&&document.activeElement===projectHeading()&&mockRoute===routeBeforeReadAll
+      &&mockState.unread.includes('thread-8')&&mockState.unread.includes('thread-3')&&mockState.unread.includes('thread-4')`, '全部已读未覆盖搜索隐藏项、丢失焦点或误清除其他提醒');
+    await evaluate(`{const search=document.getElementById('vcl-navigation').querySelector('input[type="search"]');
+      search.value='';search.dispatchEvent(new Event('input',{bubbles:true}))}`);
+    await assertBrowser(`projectHeading().getAttribute('aria-expanded')==='false'
+      &&projectHeading().querySelector('.vcl-running')&&projectHeading().querySelector('.vcl-attention')
+      &&mockRequests.filter(request=>request.method==='list').length===initialListCalls`, '批量已读改变折叠、丢失待处理状态或触发额外分页');
     await evaluate(`document.getElementById('vcl-archive').click()`);
     await waitFor(`document.querySelector('.vcl-archived-thread')&&!document.querySelector('.vcl-loading')`);
     await evaluate(`document.querySelector('.vcl-project-heading').click()`);
-    await assertBrowser(`!document.querySelector('.vcl-project-heading .vcl-activity')`, '普通聊天状态污染归档目录');
-    console.log('折叠状态专项无头检查通过：初始运行圈、折叠期间实时完成与开始、运行和未读同时显示、同类状态去重、展开定位、已读清除、审批保留、状态事件不读取分页和归档隔离。');
+    await assertBrowser(`!document.querySelector('.vcl-project-heading .vcl-activity,.vcl-project-read-all')`, '普通聊天状态或全部已读操作污染归档目录');
+    console.log('活动状态专项无头检查通过：折叠汇总、运行与提醒保留、项目全部已读、搜索隐藏项、键盘焦点、保存失败重试、新轮次保护、项目隔离、无额外分页和归档隔离。');
   } else if (listOnly) {
     await assertBrowser(`document.querySelector('.vcl-project-row').getBoundingClientRect().height===26
       &&document.querySelector('.vcl-thread-row').getBoundingClientRect().height===22

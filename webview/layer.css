@@ -149,6 +149,15 @@ body.vcl-agents-pinned > #root { right: 390px !important; }
 #vcl-navigation .vcl-project-row:focus-within .vcl-project-pin,
 #vcl-navigation .vcl-project-pin.vcl-pinned { opacity: 1; }
 #vcl-navigation .vcl-project-pin.vcl-pinned { color: var(--vscode-textLink-foreground, #007acc); }
+#vcl-navigation .vcl-project-read-all { flex: 0 0 24px; opacity: 0; pointer-events: none; }
+#vcl-navigation .vcl-project-row:hover .vcl-project-read-all,
+#vcl-navigation .vcl-project-row:focus-within .vcl-project-read-all { opacity: 1; pointer-events: auto; }
+/* Keep the project name and activity markers clear when three actions cannot fit. */
+#vcl-navigation { container: vcl-navigation / inline-size; }
+@container vcl-navigation (max-width: 230px) {
+  #vcl-navigation .vcl-project-row:has(.vcl-project-read-all) { flex-wrap: wrap; justify-content: flex-end; }
+  #vcl-navigation .vcl-project-row:has(.vcl-project-read-all) > .vcl-project-heading { flex-basis: 100%; }
+}
 #vcl-navigation .vcl-project-context { font-size: 11px; color: var(--vcl-muted); overflow-wrap: anywhere; }
 #vcl-navigation .vcl-project-context:empty { display: none; }
 #vcl-navigation .vcl-project-notice { font-size: 11px; color: var(--vcl-muted); overflow-wrap: anywhere; }

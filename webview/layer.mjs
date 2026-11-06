@@ -21,6 +21,7 @@ const icons = {
   folderPlus: ['M3 7V5a2 2 0 0 1 2-2h5l2 3h7a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z', 'M12 10v8', 'M8 14h8'],
   archive: ['M3 3h18v4H3Z', 'M5 7v14h14V7', 'M10 11h4'],
   restore: ['M3 10h5V5', 'M3 10a9 9 0 1 1 1 8', 'M12 7v5l3 2'],
+  readAll: ['m3 12 4 4L17 6', 'm12 16 9-10'],
   open: ['M15 3h6v6', 'm10 14 11-11', 'M21 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h6'],
 };
 
@@ -721,6 +722,11 @@ class Navigation {
       create.dataset.vclKey = `new:${group.key}`; create.classList.add('vcl-new-chat');
       create.disabled = !group.path || this.creating;
       projectRow.append(heading);
+      if (!archived && this.projectUnreadThreads(group.key).length) {
+        const readAll = iconButton('readAll', '将此项目的结束提醒全部标为已读', () => this.acknowledgeProject(group));
+        readAll.dataset.vclKey = `read-all:${group.key}`; readAll.classList.add('vcl-project-read-all');
+        projectRow.append(readAll);
+      }
       if (!archived && group.path) {
         const pin = iconButton('pin', group.pinned ? '取消置顶项目' : '置顶项目', () => this.toggleProjectPin(group));
         pin.dataset.vclKey = `pin:${group.key}`; pin.classList.add('vcl-project-pin');
@@ -814,6 +820,37 @@ class Navigation {
     const changed = this.activity.acknowledge(threadId);
     if (changed) this.queueEdits([{ type: 'acknowledge', threadId, turnToken }]);
     return changed;
+  }
+  projectUnreadThreads(key) {
+    // Use the full active list, including chats hidden by search or the five-chat limit.
+    return this.threads.filter((thread) => {
+      if (normalizePath(thread.cwd) !== key || !this.activity.unread.has(thread.id)) return false;
+      const { status, activeFlags = [] } = this.activity.statuses.get(thread.id) ?? thread;
+      return status !== 'systemError' && !(status === 'active'
+        && activeFlags.some((flag) => ['waitingOnApproval', 'waitingOnUserInput'].includes(flag)));
+    });
+  }
+  acknowledgeProject(group) {
+    if (this.disposed || this.disabling || this.view !== 'active') return;
+    const threads = this.projectUnreadThreads(group.key);
+    if (!threads.length) return;
+    for (const thread of threads) this.acknowledge(thread.id);
+    this.render();
+    return this.saveProjectRead(group.name, threads.length);
+  }
+  async saveProjectRead(name, count) {
+    if (this.disposed) return;
+    clearTimeout(this.saveTimer);
+    this.notifyProject(`正在保存“${name}”的已读状态…`);
+    try {
+      await this.flushState();
+      if (!this.disposed) this.notifyProject(`已清除“${name}”的 ${count} 条结束提醒。`);
+    } catch (error) {
+      if (this.disposed) return;
+      this.notifyProject(`“${name}”的已读状态保存失败：${error.message}；请重试保存。`, true);
+      // Retry the original token-bound receipts without acknowledging newer completions.
+      this.projectNotice.append(iconButton('refresh', '重试保存已读状态', () => this.saveProjectRead(name, count)));
+    }
   }
   queueEdits(edits) {
     if (this.disposed || this.disabling || !edits.length) return;
