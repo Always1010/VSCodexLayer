@@ -151,7 +151,9 @@ test('官方仅获取一次 API，草稿状态原样透传，路由观察错误�
   assert.equal(bridge.resumeDraft(), false);
   const remove = bridge.setNewChatHandler(() => { resumed += 1; });
   assert.equal(bridge.resumeDraft({ selectChat: true }), true);
-  assert.equal(bridge.resumeDraft({ freshDraft: true }), true);
+  assert.equal(bridge.resumeDraft({ freshDraft: true }), false, '明确新建草稿必须交给官方重置，不能恢复旧输入');
+  assert.equal(resumed, 1, '全新草稿不能调用恢复旧草稿的处理器');
+  assert.equal(bridge.resumeDraft({ freshDraft: false }), true);
   assert.equal(bridge.resumeDraft({ prefillPrompt: '用户明确预填' }), false);
   assert.equal(bridge.resumeDraft({ activeProject: null }), false);
   assert.equal(bridge.resumeDraft({ prefillComposerDraft: { text: 'rich draft' } }), false);

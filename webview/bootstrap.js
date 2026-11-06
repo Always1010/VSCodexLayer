@@ -216,7 +216,8 @@
         projectContext: null, vclProjectCwd: cwd, vclDraftKey: `vscodex-layer-new:${pathname}:${encodeURIComponent(key)}` };
     },
     resumeDraft(options) {
-      if (!nativeReady || !newChatHandler) return false;
+      // A fresh draft must reach the native identity reset and composer setup.
+      if (!nativeReady || !newChatHandler || options?.freshDraft) return false;
       // Explicit prefills, project selections and other specialized actions remain native.
       if (options != null && (typeof options !== 'object' || Object.entries(options).some(([key, value]) =>
         value !== undefined && !['selectChat', 'startInSidebar', 'replace', 'onNavigate', 'freshDraft'].includes(key)))) return false;
