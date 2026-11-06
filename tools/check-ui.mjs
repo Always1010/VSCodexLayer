@@ -13,7 +13,8 @@ const listOnly = process.argv.length === 3 && process.argv[2] === '--list';
 const activityOnly = process.argv.length === 3 && process.argv[2] === '--activity';
 const agentsOnly = process.argv.length === 3 && process.argv[2] === '--agents';
 const moreOnly = process.argv.length === 3 && process.argv[2] === '--more';
-if (process.argv.length > 2 && !readingOnly && !reasoningOnly && !archiveOnly && !listOnly && !activityOnly && !agentsOnly && !moreOnly) throw new Error('用法：node tools/check-ui.mjs [--reading|--reasoning|--archive|--list|--activity|--agents|--more]');
+const deleteOnly = process.argv.length === 3 && process.argv[2] === '--delete';
+if (process.argv.length > 2 && !readingOnly && !reasoningOnly && !archiveOnly && !listOnly && !activityOnly && !agentsOnly && !moreOnly && !deleteOnly) throw new Error('用法：node tools/check-ui.mjs [--reading|--reasoning|--archive|--list|--activity|--agents|--more|--delete]');
 const output = path.join(root, '.scratch', 'ui');
 await fs.mkdir(output, { recursive: true });
 const executable = [
@@ -87,6 +88,19 @@ window.addEventListener('message',message=>{
 });
 window.nativeRoot=document.getElementById('root');window.nativeApi=acquireVsCodeApi();mockNavigate('/');nativeApi.postMessage({type:'ready'});
 window.mockActionCalls=[];window.mockArchiveFailure=false;
+window.mockDeleteFailure=false;window.mockDeleteCalls=[];
+window.mockEmitDeleted=threadId=>{
+mockThreads=mockThreads.filter(t=>t.id!==threadId);mockArchivedThreads=mockArchivedThreads.filter(t=>t.id!==threadId);
+window.postMessage({type:'vscodex-layer/event',event:{type:'threads-changed',method:'thread/deleted',threadId}},location.origin)
+};
+window.mockDeleteDialog=target=>{
+const dialog=document.createElement('div');dialog.setAttribute('role','dialog');dialog.setAttribute('aria-modal','true');
+dialog.innerHTML='<p>永久删除聊天及其子聊天？此操作无法撤销。</p><button data-delete-cancel>取消</button><button data-delete-confirm>删除</button><span role="status"></span>';
+const cancel=dialog.querySelector('[data-delete-cancel]'),confirm=dialog.querySelector('[data-delete-confirm]');
+const close=()=>{dialog.remove();document.querySelector('[data-vcl-key="more:'+target.thread.id+'"]')?.focus()};
+cancel.onclick=close;confirm.onclick=()=>{mockDeleteCalls.push(target.thread.id);if(mockDeleteFailure){dialog.querySelector('[role=status]').textContent='删除失败，请重试';return}close();mockEmitDeleted(target.thread.id)};
+document.body.append(dialog);cancel.focus()
+};
 window.mockArchivedThreads=Array.from({length:61},(_,index)=>({id:'archived-'+index,title:'归档聊天 '+index,
 cwd:index<5?'D:/WRK/VSCodexLayer':index===60?null:'D:/Archive/Project',createdAt:1000+index,updatedAt:2000+index}));
 window.mockArchiveListFailure=false;window.mockHoldView=null;window.mockHeldLists=[];
@@ -110,7 +124,7 @@ __vscodexLayerBridge.subscribeThreadMenu(()=>{
     trigger.dataset.state='open';trigger.setAttribute('aria-expanded','true');
     const menu=document.createElement('div');menu.className='mock-native-menu';menu.setAttribute('role','menu');
     const rect=target.container.getBoundingClientRect();Object.assign(menu.style,{position:'fixed',left:Math.max(0,Math.min(rect.left,innerWidth-210))+'px',top:Math.max(0,Math.min(rect.bottom,innerHeight-180))+'px',width:'210px',padding:'8px',zIndex:100,background:'white',border:'1px solid #ddd'});
-    for(const [id,label] of [['rename-thread','重命名'],['share-thread','分享'],['copy-deeplink','复制深度链接'],['copy-conversation-markdown','复制为 Markdown'],['copy-working-directory','复制工作目录'],['archive-thread','归档']]){
+    for(const [id,label] of [['rename-thread','重命名'],['share-thread','分享'],['copy-deeplink','复制深度链接'],['copy-conversation-markdown','复制为 Markdown'],['copy-working-directory','复制工作目录'],['archive-thread','归档'],['delete-thread','永久删除']]){
       const button=document.createElement('button');button.setAttribute('role','menuitem');button.dataset.action=id;button.textContent=label;button.style.display='block';
       button.onclick=()=>{mockActionCalls.push({id,threadId:target.thread.id});close();
         if(id==='rename-thread'){const chat=mockThreads.find(t=>t.id===target.thread.id);chat.title='重命名后的聊天';window.postMessage({type:'vscodex-layer/event',event:'threads-changed'},location.origin)}
@@ -118,6 +132,7 @@ __vscodexLayerBridge.subscribeThreadMenu(()=>{
           if(mockArchiveFailure){document.getElementById('native-title').textContent='归档失败';return}
           mockArchivedThreads.push(mockThreads.find(t=>t.id===target.thread.id));mockThreads=mockThreads.filter(t=>t.id!==target.thread.id);__vscodexLayerBridge.threadArchived(target.thread.id);
         }
+        if(id==='delete-thread')mockDeleteDialog(target);
       };menu.append(button);
     }
     menu.onkeydown=event=>{const buttons=[...menu.querySelectorAll('button')];const index=buttons.indexOf(document.activeElement);
@@ -208,7 +223,60 @@ try {
       }
     };expandAllProjects()`);
   }
-  if (moreOnly) {
+  if (deleteOnly) {
+    await evaluate(`mockDrafts['/']='保留首页草稿';mockDrafts[mockDraftKey('/?vclProjectCwd=D%3A%2FWRK%2FVSCodexLayer')]='保留项目草稿';
+      mockNavigate('/?vclProjectCwd=D%3A%2FWRK%2FVSCodexLayer')`);
+    await waitFor(`document.querySelector('.vcl-project-context').textContent.includes('新聊天')`);
+    await evaluate(`mockNavigate('/local/thread-0');
+      window.openDelete=async id=>document.querySelector('[data-vcl-key="more:'+id+'"]').click();
+      window.postMessage({type:'vscodex-layer/event',event:{type:'thread-activity',threadId:'thread-8',phase:'completed',status:'idle'}},location.origin)`);
+    await waitFor(`document.querySelector('[data-vcl-key="thread:thread-8"] .vcl-attention')`);
+    await evaluate(`openDelete('thread-8')`);
+    await waitFor(`document.querySelector('[data-action="delete-thread"]')`);
+    await evaluate(`document.querySelector('[data-action="delete-thread"]').click()`);
+    await assertBrowser(`document.querySelector('[role=dialog]')&&mockDeleteCalls.length===0&&mockRoute==='/local/thread-0'
+      &&document.querySelector('[data-vcl-key="thread:thread-8"] .vcl-attention')`, '确认前删除了聊天、切换了路由或清除了未读');
+    await evaluate(`document.querySelector('[data-delete-cancel]').click()`);
+    await assertBrowser(`document.activeElement.dataset.vclKey==='more:thread-8'&&mockDeleteCalls.length===0`, '取消删除没有保留聊天及菜单焦点');
+    await evaluate(`openDelete('thread-8')`);
+    await waitFor(`document.querySelector('[data-action="delete-thread"]')`);
+    await evaluate(`document.querySelector('[data-action="delete-thread"]').click();mockDeleteFailure=true;document.querySelector('[data-delete-confirm]').click()`);
+    await assertBrowser(`document.querySelector('[role=dialog] [role=status]').textContent.includes('删除失败')
+      &&document.querySelector('[data-vcl-key="thread:thread-8"]')&&mockRoute==='/local/thread-0'`, '删除失败仍移除条目或切换右侧');
+    // A refresh begun before deletion may still contain the removed record.
+    await evaluate(`mockHoldView='active';document.querySelector('[aria-label="刷新聊天列表"]').click()`);
+    await waitFor(`mockHeldLists.length>0`);
+    await evaluate(`mockDeleteFailure=false;document.querySelector('[data-delete-confirm]').click()`);
+    await waitFor(`!document.querySelector('[data-vcl-key="thread:thread-8"]')`);
+    await assertBrowser(`mockDeleteCalls.join(',')==='thread-8,thread-8'&&mockRoute==='/local/thread-0'
+      &&!mockArchivedThreads.some(t=>t.id==='thread-8')`, '删除对象错误、误归档或切换了其他聊天');
+    await evaluate(`mockHoldView=null;mockHeldLists.splice(0).forEach(respond=>respond())`);
+    await waitFor(`!document.querySelector('[aria-label="刷新聊天列表"]').disabled`);
+    await assertBrowser(`!document.querySelector('[data-vcl-key="thread:thread-8"]')`, '删除前的迟到分页重新加入已删除聊天');
+    await evaluate(`document.getElementById('vcl-archive').click()`);
+    await waitFor(`document.querySelector('[data-vcl-key="thread:archived-4"]')&&!document.querySelector('.vcl-loading')`);
+    await evaluate(`mockHoldView='archived';document.querySelector('[aria-label="刷新已归档聊天"]').click()`);
+    await waitFor(`mockHeldLists.length>0`);
+    await evaluate(`mockEmitDeleted('archived-4')`);
+    await waitFor(`!document.querySelector('[data-vcl-key="thread:archived-4"]')`);
+    await evaluate(`mockHoldView=null;mockHeldLists.splice(0).forEach(respond=>respond())`);
+    await waitFor(`!document.querySelector('[aria-label="刷新已归档聊天"]').disabled`);
+    await assertBrowser(`!document.querySelector('[data-vcl-key="thread:archived-4"]')&&mockRoute==='/local/thread-0'`, '其他面板删除通知或归档迟到分页处理错误');
+    await evaluate(`document.getElementById('vcl-archive-back').click();openDelete('thread-0')`);
+    await waitFor(`document.querySelector('[data-action="delete-thread"]')`);
+    await evaluate(`document.querySelector('[data-action="delete-thread"]').click();document.querySelector('[data-delete-confirm]').click()`);
+    await waitFor(`new URL(mockRoute,location.origin).searchParams.get('vclProjectCwd')==='D:/WRK/VSCodexLayer'`);
+    await assertBrowser(`document.getElementById('native-composer').value==='保留项目草稿'
+      &&!document.querySelector('[data-vcl-key="thread:thread-0"]')`, '删除当前聊天没有回到项目草稿或丢失草稿');
+    await evaluate(`mockNavigate('/')`);
+    await waitFor(`document.getElementById('native-composer').value==='保留首页草稿'`);
+    await evaluate(`mockNavigate('/local/thread-1')`);
+    await waitFor(`document.querySelector('[data-vcl-key="thread:thread-1"]')?.getAttribute('aria-current')==='page'`);
+    await evaluate(`mockEmitDeleted('thread-1')`);
+    await waitFor(`mockRoute==='/'`);
+    await assertBrowser(`document.getElementById('native-composer').value==='保留首页草稿'`, '删除当前聊天丢失首页草稿');
+    console.log('删除专项无头检查通过：菜单入口、确认与取消、失败保留与重试、目标绑定、非当前聊天隔离、普通／归档迟到分页、跨面板删除通知和当前聊天返回草稿。');
+  } else if (moreOnly) {
     await evaluate(`window.currentKey='d:/wrk/vscodexlayer';window.otherKey='d:/wrk/project';
       window.projectView=key=>document.querySelector('[data-vcl-key="project:'+key+'"]').closest('.vcl-project');
       window.headingView=key=>projectView(key).querySelector('.vcl-project-heading');

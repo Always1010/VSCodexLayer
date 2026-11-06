@@ -482,7 +482,7 @@ test('Linux SSH 宿主读取同主机聊天并校验远程目录，错误宿主�
   assert.equal((await windows.request('init')).result.supported, false);
 });
 
-test('活动通知不触发完整列表刷新，归档通知携带目标编号', async (t) => {
+test('活动通知不触发完整列表刷新，归档与删除通知携带目标编号', async (t) => {
   const f = fixture(); t.after(() => f.host.dispose());
   for (const method of ['thread/status/changed', 'turn/started', 'turn/completed']) {
     f.messages.length = 0;
@@ -493,6 +493,8 @@ test('活动通知不触发完整列表刷新，归档通知携带目标编号',
   f.messages.length = 0;
   f.notify({ method: 'thread/archived', params: { threadId: 'thread' } });
   assert.deepEqual(f.messages[0].event, { type: 'threads-changed', method: 'thread/archived', threadId: 'thread' });
+  f.notify({ method: 'thread/deleted', params: { threadId: 'deleted', transcript: 'secret' } });
+  assert.deepEqual(f.messages.at(-1).event, { type: 'threads-changed', method: 'thread/deleted', threadId: 'deleted' });
 });
 
 test('创建通知立即转发安全摘要，标题更新无需等待分页，子任务不入列', (t) => {

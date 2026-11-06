@@ -73,13 +73,16 @@ test('官方仅获取一次 API，草稿状态原样透传，路由观察错误�
   const choose = () => {};
   const items = bridge.filterThreadMenu([
     { id: 'rename-thread', onSelect: choose }, { id: 'share-thread', enabled: false },
-    { id: 'copy', submenu: [{ id: 'copy-deeplink', onSelect: choose }, { id: 'delete-thread' }] },
-    { id: 'pin-thread' }, { id: 'archive-thread', onSelect: choose }, { id: 'delete-thread' },
+    { id: 'copy', submenu: [{ id: 'copy-deeplink', onSelect: choose }, { id: 'fork' }] },
+    { id: 'pin-thread' }, { id: 'archive-thread', onSelect: choose }, { id: 'delete-thread', onSelect: choose, enabled: false, selectAfterClose: true },
   ]);
-  assert.equal(items.map((item) => item.id).join(','), 'rename-thread,share-thread,copy,vcl-archive-separator,archive-thread');
+  assert.equal(items.map((item) => item.id).join(','), 'rename-thread,share-thread,copy,vcl-archive-separator,archive-thread,delete-thread');
   assert.equal(items[0].onSelect, choose, '原生动作引用必须原样保留');
   assert.equal(items[1].enabled, false, '保留原生能力限制');
   assert.equal(items[2].submenu.length, 1);
+  assert.equal(items.at(-1).onSelect, choose, '删除必须保留原生确认动作');
+  assert.equal(items.at(-1).enabled, false, '删除必须保留原生能力限制');
+  assert.equal(items.at(-1).selectAfterClose, true, '关闭菜单后再打开原生确认');
   let archived;
   const unsubscribeArchived = bridge.subscribeThreadArchived((id) => { archived = id; });
   bridge.threadArchived('other'); assert.equal(archived, 'other');

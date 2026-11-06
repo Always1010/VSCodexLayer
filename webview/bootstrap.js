@@ -120,7 +120,7 @@
     },
     filterThreadMenu(items) {
       const allowed = new Set(['rename-thread', 'share-thread', 'copy-deeplink', 'copy-conversation-markdown',
-        'copy-working-directory', 'archive-thread']);
+        'copy-working-directory', 'archive-thread', 'delete-thread']);
       const filter = (values) => values.flatMap((item) => {
         if (item.type === 'separator') return [];
         if (allowed.has(item.id)) return [item];

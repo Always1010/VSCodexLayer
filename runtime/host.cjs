@@ -430,7 +430,7 @@ exports.createLayerHost = function createLayerHost({ vscode, provider, webview, 
     }
     throw new Error('不支持的增强操作。');
   }
-  const changedMethods = new Set(['thread/started', 'thread/name/updated', 'thread/archived', 'thread/unarchived',
+  const changedMethods = new Set(['thread/started', 'thread/name/updated', 'thread/archived', 'thread/unarchived', 'thread/deleted',
     'thread/metadata/updated']);
   const replies = new Map();
   const replyId = (item) => item?.type === 'agentMessage' && item.phase !== 'commentary'

@@ -35,7 +35,8 @@ export async function checkNativeChatMenu(plan) {
     : local(/await ([\w$]+)\(\);[\w$]+=[\w$]+\(\{automations:/);
   const intl = local(/[\w$]+=([\w$]+)\(\),[\w$]+=[\w$]+&&!1/);
   const scope = { value: { routeKind: 'local-thread', conversationId: 'current' }, get: () => null };
-  const calls = { commands: 0, targets: [], archives: [], titles: [], dialogs: [] };
+  const calls = { commands: 0, targets: [], archives: [], titles: [], dialogs: [], surfaces: [], deletes: [] };
+  const confirmDelete = () => calls.deletes.push('native-confirmation');
   const nativeActions = {
     archiveThread(options) { calls.archives.push(options); },
     renameThread(options) { calls.titles.push(options); return Promise.resolve(); },
@@ -69,7 +70,9 @@ export async function checkNativeChatMenu(plan) {
     [intl]: () => ({ formatMessage: (message) => message?.defaultMessage ?? '菜单' }),
     [menuBuilder]: (options) => {
       calls.targets.push(options.target);
-      return [{ id: 'rename-thread', onSelect: options.onRename }, { id: 'delete-thread' },
+      calls.surfaces.push(options.surface);
+      return [{ id: 'rename-thread', onSelect: options.onRename },
+        ...(options.surface === 'sidebar' ? [{ id: 'delete-thread', onSelect: confirmDelete, selectAfterClose: true }] : []),
         { id: 'copy', submenu: [{ id: 'copy-deeplink', onSelect() {} }] },
         { id: 'archive-thread', onSelect: options.onArchive }];
     },
@@ -94,7 +97,13 @@ export async function checkNativeChatMenu(plan) {
   assert.ok(dropdown, '原生菜单必须渲染');
   const items = await dropdown.getItems();
   assert.equal(calls.commands, 0, '左侧菜单不能重定向当前聊天的全局快捷键');
-  assert.equal(items.some((item) => item.id === 'delete-thread'), false);
+  assert.equal(calls.surfaces[0], 'sidebar', '左侧必须使用含原生删除确认的侧栏操作');
+  const deletion = items.find((item) => item.id === 'delete-thread');
+  assert.equal(deletion.onSelect, confirmDelete);
+  assert.equal(deletion.selectAfterClose, true);
+  assert.equal(calls.deletes.length, 0, '打开菜单不能触发删除');
+  deletion.onSelect();
+  assert.deepEqual(calls.deletes, ['native-confirmation']);
   assert.equal(calls.targets[0].conversationId, 'other');
   assert.equal(calls.targets[0].hostId, 'local');
   assert.equal(calls.targets[0].cwd, '/other');
@@ -119,7 +128,9 @@ export async function checkNativeChatMenu(plan) {
   assert.equal(calls.archives.length, 1, '运行中的聊天必须先走原生确认，不能直接归档');
   assert.ok(stateChanges.includes(true), '原生归档确认必须打开');
   running = false;
-  context[name]({ ...props, __vclLayerMenu: false, conversationId: 'current' });
+  const officialMenu = await findMenu(context[name]({ ...props, __vclLayerMenu: false, conversationId: 'current' })).getItems();
+  assert.equal(calls.surfaces.at(-1), 'header', '官方标题栏保持原有操作范围');
+  assert.equal(officialMenu.some((item) => item.id === 'delete-thread'), false);
   assert.ok(calls.commands > 0, '官方当前聊天命令必须保持注册');
 
   const header = plan.files.find((file) => /webview\/assets\/header-/.test(file.path)).content.toString();

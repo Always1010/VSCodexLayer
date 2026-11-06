@@ -226,7 +226,7 @@ class Navigation {
   invalidateLists(change) {
     if (this.disposed) return;
     if (change?.method === 'thread/started' && change.thread?.id === change.threadId
-      && typeof change.threadId === 'string' && this.membership.get(change.threadId) !== true) {
+      && typeof change.threadId === 'string' && ![true, 'deleted'].includes(this.membership.get(change.threadId))) {
       const pending = this.pendingThreads.get(change.threadId) ?? { thread: { ...change.thread }, titleUpdated: false };
       const thread = pending.thread;
       this.pendingThreads.set(thread.id, pending);
@@ -243,7 +243,22 @@ class Navigation {
       }
       this.render();
     }
-    if (typeof change?.threadId === 'string' && ['thread/archived', 'thread/unarchived'].includes(change.method)) {
+    if (typeof change?.threadId === 'string' && change.method === 'thread/deleted') {
+      this.membership.set(change.threadId, 'deleted');
+      this.pendingThreads.delete(change.threadId);
+      for (const view of ['active', 'archived']) {
+        const target = this.cache(view);
+        target.threads = target.threads.filter((thread) => thread.id !== change.threadId);
+      }
+      this.acknowledge(change.threadId); this.activity.statuses.delete(change.threadId);
+      if (this.active === change.threadId) {
+        if (this.draftProjectCwd !== null) this.newProjectChat(this.draftProjectCwd);
+        else this.client.request('new-chat', { path: this.draftPath }).catch((error) => this.showError(error));
+      }
+      this.render(); this.persist();
+    }
+    if (typeof change?.threadId === 'string' && this.membership.get(change.threadId) !== 'deleted'
+      && ['thread/archived', 'thread/unarchived'].includes(change.method)) {
       const archived = change.method === 'thread/archived';
       this.membership.set(change.threadId, archived);
       if (archived) this.pendingThreads.delete(change.threadId);

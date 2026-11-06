@@ -35,6 +35,10 @@ export function patchThreadMenu(source) {
   for (const helper of [command, shortcut]) body = body.replace(new RegExp(`\\b${escape(helper)}\\(`, 'g'), `__vclLayerMenu||${helper}(`);
   const jsx = unique([...body.matchAll(new RegExp(`(${identifier})=\\(0,(${identifier})\\.jsx\\)\\(${identifier},\\{preserveBrowserContextMenu:!0,`, 'g'))], '原生菜单入口')[2];
   const menuGetter = unique([...body.matchAll(new RegExp(`getItems:(${identifier}),renderItem:`, 'g'))], '菜单项读取')[1];
+  // The native sidebar surface includes permanent deletion with its own capability
+  // checks and confirmation dialog; the header surface only offers archiving.
+  const menuBuilder = unique([...body.matchAll(new RegExp(`await ${identifier}\\(\\{scope:${identifier},surface:\`header\``, 'g'))], '原生侧栏聊天操作');
+  body = body.replace(menuBuilder[0], menuBuilder[0].replace('surface:`header`', 'surface:__vclLayerMenu?`sidebar`:`header`'));
   body = body.replace(`getItems:${menuGetter},renderItem:`,
     `getItems:__vclLayerMenu?()=>Promise.resolve().then(()=>${menuGetter}()).then(items=>{let result=globalThis.__vscodexLayerBridge.filterThreadMenu(items);`
     + `if(!result.length)throw new Error("此聊天暂无可用操作。");return result}).catch(error=>{globalThis.__vscodexLayerBridge?.threadMenuError(error.message,__vclMenuToken);throw error}):${menuGetter},renderItem:`);
