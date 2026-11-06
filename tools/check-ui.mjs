@@ -549,14 +549,19 @@ try {
       emitActivity('thread-4','completed','active',['waitingOnUserInput']);
       emitActivity('thread-5','started','active');emitActivity('thread-8','completed')`);
     await waitFor(`projectReadAll()&&mockState.unread.includes('thread-8')`);
-    await evaluate(`{const separator=document.querySelector('[role=separator]');
-      for(let i=0;i<7;i++)separator.dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowLeft',bubbles:true}))}`);
-    await evaluate(`projectHeading().focus()`);
-    await assertBrowser(`projectReadAll().getBoundingClientRect().right<=document.getElementById('vcl-navigation').getBoundingClientRect().right
-      &&(projectHeading().getBoundingClientRect().bottom<=projectReadAll().getBoundingClientRect().top
-        ||projectHeading().lastElementChild.getBoundingClientRect().right<=projectReadAll().getBoundingClientRect().left)`, '窄导航下全部已读按钮溢出或遮住项目状态');
-    await evaluate(`{const separator=document.querySelector('[role=separator]');
-      for(let i=0;i<7;i++)separator.dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowRight',bubbles:true}))}`);
+    for (const width of [180, 220, 250]) {
+      await evaluate(`{const separator=document.querySelector('[role=separator]');
+        const delta=${width}-Number(separator.getAttribute('aria-valuenow'));
+        for(let i=0;i<Math.abs(delta)/10;i++)separator.dispatchEvent(new KeyboardEvent('keydown',{key:delta<0?'ArrowLeft':'ArrowRight',bubbles:true}))}`);
+      await evaluate(`projectHeading().focus()`);
+      await assertBrowser(`document.getElementById('vcl-navigation').getBoundingClientRect().width===${width}
+        &&projectHeading().closest('.vcl-project-row').getBoundingClientRect().height===26
+        &&projectHeading().querySelector('.vcl-label').getBoundingClientRect().width>0
+        &&projectHeading().lastElementChild.getBoundingClientRect().right<=projectReadAll().getBoundingClientRect().left
+        &&[...projectHeading().closest('.vcl-project-row').querySelectorAll('.vcl-icon-button')].every(button=>
+          Math.abs(projectHeading().getBoundingClientRect().y-button.getBoundingClientRect().y)<=1
+          &&button.getBoundingClientRect().right<=document.getElementById('vcl-navigation').getBoundingClientRect().right)`, `${width} 像素导航下项目行换行、按钮溢出或遮住项目状态`);
+    }
     await evaluate(`projectHeading().focus()`);
     await assertBrowser(`getComputedStyle(projectReadAll()).opacity==='1'&&projectReadAll().getAttribute('aria-label').includes('全部标为已读')`, '键盘聚焦未显示全部已读按钮或缺少无障碍名称');
     await evaluate(`window.mockStateSaveFailure=true;projectReadAll().focus();projectReadAll().click()`);
