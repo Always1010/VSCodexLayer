@@ -12,6 +12,7 @@ import { checkNativeReasoning } from './native-reasoning.mjs';
 import { checkNativeDraftLifecycle } from './native-draft-lifecycle.mjs';
 import { checkNativeChatMenu } from './native-chat-menu.mjs';
 import { checkNativeAgentDetail } from './native-agent-detail.mjs';
+import { checkNativeStartup } from './native-startup.mjs';
 
 const args = process.argv.slice(2);
 if (args.length && (args[0] !== '--extension' || args.length !== 2)) {
@@ -34,6 +35,7 @@ const originalHost = (await readUnpatched(directory, 'out/extension.js')).toStri
 const originalNamespace = /let [A-Za-z_$][\w$]*=([A-Za-z_$][\w$]*)\.Uri\.joinPath\(this\.extensionUri,"webview"\)/.exec(originalHost)?.[1];
 const originalWslHelper = /function ([A-Za-z_$][\w$]*)\(\)\{return [A-Za-z_$][\w$]*\("runCodexInWindowsSubsystemForLinux",!1\)\?/.exec(originalHost)?.[1];
 assert.ok(originalNamespace && originalWslHelper, '官方宿主必须包含 VS Code API 和 WSL 运行模式判断');
+await checkNativeStartup(host, byPath('out/vscodex-layer-startup.cjs'), originalNamespace);
 const injectionStart = host.indexOf('let __vclHost;');
 const injectionEnd = host.indexOf('let a=e.onDidReceiveMessage', injectionStart);
 assert.ok(injectionStart >= 0 && injectionEnd > injectionStart);

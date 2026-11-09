@@ -50,12 +50,12 @@ function patchHost(source) {
   const wslMatches = [...source.matchAll(new RegExp(`function (${identifier})\\(\\)\\{return ${identifier}\\("runCodexInWindowsSubsystemForLinux",!1\\)\\?`, 'g'))];
   if (wslMatches.length !== 1) throw new Error(`WSL 运行模式判断接入点数量异常：${wslMatches.length}`);
   const isWsl = wslMatches[0][1];
-  source = patchWebviewStartup(source, vscode);
-  return replaceUnique(source, new RegExp(anchor.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')),
+  source = replaceUnique(source, new RegExp(anchor.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')),
     `let __vclHost;try{__vclHost=require(${vscode}.Uri.joinPath(this.extensionUri,"out","vscodex-layer-host.cjs").fsPath)`
     + `.createLayerHost({vscode:${vscode},provider:this,webview:e,onDispose:n,isWsl:()=>${isWsl}()});`
     + 'this.subscriptions.push(__vclHost)}catch(__vclError){this.logger.warning("VSCodexLayer host unavailable: "+String(__vclError?.stack??__vclError))}'
     + 'let a=e.onDidReceiveMessage(u=>{if(__vclHost?.handle(u))return;if(s.markMessageReceived(),', '宿主消息桥');
+  return patchWebviewStartup(source, vscode);
 }
 
 function patchHtml(source) {

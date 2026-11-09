@@ -33,12 +33,12 @@ export async function buildPatchPlan(directory) {
     path: relative, originalHash: hash, content: (await readOriginal(directory, relative, hash)).toString('utf8'),
   })));
   const anchor = 'let a=e.onDidReceiveMessage(u=>{if(s.markMessageReceived(),';
-  originals[0].content = patchWebviewStartup(originals[0].content, 'Ge');
   originals[0].content = replaceOnce(originals[0].content, anchor,
     'let __vclHost;try{__vclHost=require(Ge.Uri.joinPath(this.extensionUri,"out","vscodex-layer-host.cjs").fsPath)'
     + '.createLayerHost({vscode:Ge,provider:this,webview:e,onDispose:n,isWsl:()=>Wr()});'
     + 'this.subscriptions.push(__vclHost)}catch(__vclError){this.logger.warning("VSCodexLayer host unavailable")}'
     + 'let a=e.onDidReceiveMessage(u=>{if(__vclHost?.handle(u))return;if(s.markMessageReceived(),');
+  originals[0].content = patchWebviewStartup(originals[0].content, 'Ge');
   const script = '<script type="module" crossorigin src="./assets/index-625cd12fbdb9.js">';
   originals[1].content = replaceOnce(originals[1].content, script,
     '<!-- VSCodexLayer v1 -->\n'
