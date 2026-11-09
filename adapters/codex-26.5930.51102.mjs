@@ -7,6 +7,7 @@ import { buildReasoningPatchFiles } from './reasoning.mjs';
 import { buildChatMenuPatch } from './chat-menu.mjs';
 import { buildAgentDetailHeader } from './agent-detail.mjs';
 import { patchProjectDraftReset } from './draft-lifecycle.mjs';
+import { patchWebviewStartup } from './webview-startup.mjs';
 
 export const VERSION = '26.5930.51102';
 export const ADAPTER = `codex-${VERSION}-v5`;
@@ -32,6 +33,7 @@ export async function buildPatchPlan(directory) {
     path: relative, originalHash: hash, content: (await readOriginal(directory, relative, hash)).toString('utf8'),
   })));
   const anchor = 'let a=e.onDidReceiveMessage(u=>{if(s.markMessageReceived(),';
+  originals[0].content = patchWebviewStartup(originals[0].content, 'Ge');
   originals[0].content = replaceOnce(originals[0].content, anchor,
     'let __vclHost;try{__vclHost=require(Ge.Uri.joinPath(this.extensionUri,"out","vscodex-layer-host.cjs").fsPath)'
     + '.createLayerHost({vscode:Ge,provider:this,webview:e,onDispose:n,isWsl:()=>Wr()});'
@@ -139,6 +141,7 @@ export async function buildPatchPlan(directory) {
   originals.push(menu.file);
   const assets = [
     ['runtime/host.cjs', 'out/vscodex-layer-host.cjs'],
+    ['runtime/startup.cjs', 'out/vscodex-layer-startup.cjs'],
     ['webview/bootstrap.js', 'webview/vscodex-layer/bootstrap.js'],
     ['webview/client.mjs', 'webview/vscodex-layer/client.mjs'],
     ['webview/agent-navigation.mjs', 'webview/vscodex-layer/agent-navigation.mjs'],

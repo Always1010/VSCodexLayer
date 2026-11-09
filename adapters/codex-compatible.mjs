@@ -7,6 +7,7 @@ import { buildReasoningPatchFiles } from './reasoning.mjs';
 import { buildChatMenuPatch } from './chat-menu.mjs';
 import { buildAgentDetailHeader } from './agent-detail.mjs';
 import { patchProjectDraftReset } from './draft-lifecycle.mjs';
+import { patchWebviewStartup } from './webview-startup.mjs';
 
 export const FAMILY = 'codex-webview-family-1';
 const identifier = String.raw`[A-Za-z_$][\w$]*`;
@@ -49,6 +50,7 @@ function patchHost(source) {
   const wslMatches = [...source.matchAll(new RegExp(`function (${identifier})\\(\\)\\{return ${identifier}\\("runCodexInWindowsSubsystemForLinux",!1\\)\\?`, 'g'))];
   if (wslMatches.length !== 1) throw new Error(`WSL 运行模式判断接入点数量异常：${wslMatches.length}`);
   const isWsl = wslMatches[0][1];
+  source = patchWebviewStartup(source, vscode);
   return replaceUnique(source, new RegExp(anchor.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')),
     `let __vclHost;try{__vclHost=require(${vscode}.Uri.joinPath(this.extensionUri,"out","vscodex-layer-host.cjs").fsPath)`
     + `.createLayerHost({vscode:${vscode},provider:this,webview:e,onDispose:n,isWsl:()=>${isWsl}()});`
@@ -319,6 +321,7 @@ export async function buildCompatiblePatchPlan(directory) {
   files.push(menu.file);
   for (const [source, target] of [
     ['runtime/host.cjs', 'out/vscodex-layer-host.cjs'],
+    ['runtime/startup.cjs', 'out/vscodex-layer-startup.cjs'],
     ['webview/bootstrap.js', 'webview/vscodex-layer/bootstrap.js'],
     ['webview/client.mjs', 'webview/vscodex-layer/client.mjs'],
     ['webview/agent-navigation.mjs', 'webview/vscodex-layer/agent-navigation.mjs'],
