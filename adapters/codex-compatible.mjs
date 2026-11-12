@@ -8,6 +8,7 @@ import { buildChatMenuPatch } from './chat-menu.mjs';
 import { buildAgentDetailHeader } from './agent-detail.mjs';
 import { patchProjectDraftReset } from './draft-lifecycle.mjs';
 import { patchWebviewStartup } from './webview-startup.mjs';
+import { routeObserver } from '../lib/compatibility.mjs';
 
 export const FAMILY = 'codex-webview-family-1';
 const identifier = String.raw`[A-Za-z_$][\w$]*`;
@@ -39,6 +40,14 @@ function choose(files, predicate, label) {
   return matches[0];
 }
 
+export function nativeWslCheck(source) {
+  const legacy = [...source.matchAll(new RegExp(`function (${identifier})\\(\\)\\{return ${identifier}\\("runCodexInWindowsSubsystemForLinux",!1\\)\\?`, 'g'))];
+  if (legacy.length === 1) return { helper: legacy[0][1], expression: `${legacy[0][1]}()` };
+  const current = [...source.matchAll(new RegExp(`(${identifier})\\("runCodexInWindowsSubsystemForLinux",!1\\)`, 'g'))];
+  if (legacy.length || current.length !== 1) throw new Error(`WSL 运行模式判断接入点数量异常：${current.length}`);
+  return { helper: current[0][1], expression: `process.platform==="win32"&&${current[0][1]}("runCodexInWindowsSubsystemForLinux",!1)` };
+}
+
 function patchHost(source) {
   const anchor = 'let a=e.onDidReceiveMessage(u=>{if(s.markMessageReceived(),';
   const anchorMatches = [...source.matchAll(new RegExp(anchor.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'))];
@@ -47,12 +56,10 @@ function patchHost(source) {
   const namespaceMatches = [...prefix.matchAll(new RegExp(`let ${identifier}=(${identifier})\\.Uri\\.joinPath\\(this\\.extensionUri,"webview"\\)`, 'g'))];
   if (namespaceMatches.length !== 1) throw new Error(`VS Code API 命名空间数量异常：${namespaceMatches.length}`);
   const vscode = namespaceMatches[0][1];
-  const wslMatches = [...source.matchAll(new RegExp(`function (${identifier})\\(\\)\\{return ${identifier}\\("runCodexInWindowsSubsystemForLinux",!1\\)\\?`, 'g'))];
-  if (wslMatches.length !== 1) throw new Error(`WSL 运行模式判断接入点数量异常：${wslMatches.length}`);
-  const isWsl = wslMatches[0][1];
+  const isWsl = nativeWslCheck(source).expression;
   source = replaceUnique(source, new RegExp(anchor.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')),
     `let __vclHost;try{__vclHost=require(${vscode}.Uri.joinPath(this.extensionUri,"out","vscodex-layer-host.cjs").fsPath)`
-    + `.createLayerHost({vscode:${vscode},provider:this,webview:e,onDispose:n,isWsl:()=>${isWsl}()});`
+    + `.createLayerHost({vscode:${vscode},provider:this,webview:e,onDispose:n,isWsl:()=>${isWsl}});`
     + 'this.subscriptions.push(__vclHost)}catch(__vclError){this.logger.warning("VSCodexLayer host unavailable: "+String(__vclError?.stack??__vclError))}'
     + 'let a=e.onDidReceiveMessage(u=>{if(__vclHost?.handle(u))return;if(s.markMessageReceived(),', '宿主消息桥');
   return patchWebviewStartup(source, vscode);
@@ -151,9 +158,9 @@ export function patchSplitComposerScope(source) {
       + `let ${conversation}=${helper}(${route});switch(${route}.routeKind){`, '路由上下文');
 }
 
-function patchSplitNewChat(source) {
+export function patchSplitNewChat(source) {
   return replaceUnique(source,
-    new RegExp(`function (${identifier})\\((${identifier}),(${identifier})\\)\\{(?=let\\{activeProject:)`),
+    new RegExp(`function (${identifier})\\((${identifier}),(${identifier})\\)\\{(?=(?:(?!function ).){0,600}let\\{activeProject:${identifier},prefillComposerMode:)`),
     (_all, name, scope, options) => `function ${name}(${scope},${options}){if(globalThis.__vscodexLayerBridge?.resumeDraft(${options}))return;`,
     '原生新聊天');
 }
@@ -236,15 +243,18 @@ function patchComposer(source) {
       `existingWorkspaceRoot:__vclProjectCwd??${workspace},localProjectId:__vclProjectCwd!==undefined?undefined:${localProject},remoteProjectId:__vclProjectCwd!==undefined?undefined:${remoteProject}?.id,workspaceRoots:${roots}`,
     'Composer 创建上下文');
   source = replaceUnique(source,
-    new RegExp(`(${identifier})=\\{\\.\\.\\.(${identifier}),\\.\\.\\.(${identifier}),(?=(?:responseTextAnnotations|attachmentOrder):)`),
+    new RegExp(`(${identifier})=\\{\\.\\.\\.(${identifier}),\\.\\.\\.(${identifier}(?:\\(${identifier}(?:,${identifier})*\\))?),(?=(?:responseTextAnnotations|attachmentOrder):)`),
     (_all, context, base, extra) => `${context}={...${base},...${extra},vclProjectCwd:__vclProjectCwd,`,
     'Composer 草稿上下文');
 
   const submitMarker = 'startConversationWithPrimaryRuntimeForFirstTurn:';
   const markerIndex = source.indexOf(submitMarker);
   if (markerIndex < 0) throw new Error('首次提交接入点缺失。');
-  const submitMatch = new RegExp(`=async\\((${identifier}),(${identifier}),(${identifier}),(${identifier}),(${identifier}),(${identifier}),(${identifier})\\)=>\\{`)
-    .exec(source.slice(markerIndex, markerIndex + 5000));
+  const submitEnd = /}function |}var /.exec(source.slice(markerIndex));
+  const submitBody = source.slice(markerIndex, submitEnd ? markerIndex + submitEnd.index + 1 : undefined);
+  const submitName = new RegExp(`handleSubmitLocal:(${identifier})`).exec(submitBody)?.[1];
+  const submitMatch = submitName && new RegExp(`${submitName}=async\\((${identifier}),(${identifier}),(${identifier}),(${identifier})(?:,${identifier})*\\)=>\\{`)
+    .exec(submitBody);
   const mounted = new RegExp(`isMounted:(${identifier})`).exec(source.slice(Math.max(0, markerIndex - 1800), markerIndex))?.[1];
   if (!submitMatch || !mounted) throw new Error('无法识别首次提交局部变量。');
   const submitStart = markerIndex + submitMatch.index;
@@ -281,22 +291,23 @@ export async function buildCompatiblePatchPlan(directory) {
   const { root, version } = await extensionRoot(directory);
   const appFiles = await originalsIn(root, ['app-initial-', 'app-runtime-', 'composer-content-']);
   const headerFiles = await originalsIn(root, 'header-');
-  const route = choose(appFiles, (source) => source.includes('/extension/panel/new')
-    && source.includes('navigate-to-route') && (source.split('activeWorkspaceRoot').length - 1) <= 2, '路由模块');
+  const route = choose(appFiles, (source) => routeObserver.test(source), '路由模块');
   const composer = choose(appFiles, (source) => (source.split('activeWorkspaceRoot').length - 1) >= 3
     && source.includes('startConversationWithPrimaryRuntimeForFirstTurn'), 'Composer 模块');
   const header = choose(headerFiles, (source) => source.includes('header.recentChats') && source.includes('tasksQuery'), '首页模块');
-  const splitRoute = route.path.split('/').at(-1).startsWith('app-runtime-');
+  // Modern builds can split these roles or merge them back into app-initial.
+  const splitRoute = !new RegExp(`function ${identifier}\\(\\{pathname:${identifier},routeTemplate:${identifier},search:${identifier}=`).test(route.bytes.toString());
+  const mergedScopes = !splitRoute && route.bytes.toString().includes('homeDraftClientThreadId');
   const routeModules = [route.path];
   const official = [
     ['out/extension.js', patchHost],
     ['webview/index.html', patchHtml],
-    [route.path, splitRoute ? patchRouteObservation : patchRoute],
+    [route.path, splitRoute || mergedScopes ? patchRouteObservation : patchRoute],
     [header.path, patchHeader],
     [composer.path, patchComposer],
   ];
-  if (splitRoute) {
-    const scopeFiles = await originalsIn(root, ['route-scope-', 'composer-scope-', 'use-start-new-conversation-']);
+  if (splitRoute || mergedScopes) {
+    const scopeFiles = [...appFiles, ...await originalsIn(root, ['route-scope-', 'composer-scope-', 'use-start-new-conversation-'])];
     for (const [predicate, transform, label] of [
       [(source) => source.includes('draft-thread-identities-v1') && source.includes('routeTemplate:'), patchSplitRouteScope, '路由作用域模块'],
       [(source) => source.includes('browserTabMentionConversationId') && source.includes('homeDraftKey:'), patchSplitComposerScope, 'Composer 作用域模块'],
@@ -304,11 +315,16 @@ export async function buildCompatiblePatchPlan(directory) {
     ]) {
       const file = choose(scopeFiles, predicate, label);
       official.push([file.path, transform]);
-      routeModules.push(file.path);
+      if (!routeModules.includes(file.path)) routeModules.push(file.path);
     }
   }
   const files = [];
   for (const [relative, transform] of official) {
+    const existing = files.find((entry) => entry.path === relative);
+    if (existing) {
+      existing.content = transform(existing.content);
+      continue;
+    }
     const bytes = await readUnpatched(root, relative);
     files.push({ path: relative, originalHash: sha256(bytes), content: transform(bytes.toString('utf8')) });
   }

@@ -50,7 +50,7 @@ export function patchThreadMenu(source) {
   body = body.replace(pinShortcut[0], `${pinShortcut[1]}=${pinShortcut[2]}==null||__vclLayerMenu?null:(0,${jsx}.jsx)(${pinShortcut[3]},{enabled:`);
   const react = unique([...body.matchAll(new RegExp(`\\(0,(${identifier})\\.useState\\)\\(null\\)`, 'g'))].slice(0, 1), '菜单 React 状态')[1];
   const active = unique([...body.matchAll(new RegExp(`${identifier}\\((${identifier}),${identifier}\\)\\?\\.type===\`active\``, 'g'))], '归档运行状态')[1];
-  const restricted = unique([...body.matchAll(new RegExp(`if\\(${identifier}\\.get\\((${identifier}),\\{hostId:${identifier},threadId:${identifier}\\}\\)\\)\\{`, 'g'))], '归档受限聊天')[1];
+  const restricted = unique([...body.matchAll(new RegExp(`\\b${identifier}\\.get\\((${identifier}),\\{hostId:${identifier},threadId:${identifier}\\}\\)\\)?(?:\\{|\\?)`, 'g'))], '归档受限聊天')[1];
   const automation = unique([...body.matchAll(new RegExp(`await (${identifier})\\((\`list-automations\`)?\\);${identifier}=(${identifier})\\(\\{automations:`, 'g'))], '归档关联任务检查');
   const batch = { active: imported(source, active), restricted: imported(source, restricted),
     automations: imported(source, automation[1]), matchAutomation: imported(source, automation[3]),
@@ -63,7 +63,7 @@ export function patchThreadMenu(source) {
 }
 
 export function archiveDependencies(source) {
-  const restore = unique([...source.matchAll(new RegExp(`await (${identifier})\\((${identifier}),${identifier}\\)\\.unarchiveConversation\\(${identifier},\\{useAppServerPins:\\2\\.get\\((${identifier})\\)\\}\\)`, 'g'))], '原生归档恢复服务');
+  const restore = unique([...source.matchAll(new RegExp(`\\b(${identifier})\\((${identifier}),${identifier}\\)\\.unarchiveConversation\\(${identifier},\\{useAppServerPins:\\2\\.get\\((${identifier})\\)\\}\\)`, 'g'))], '原生归档恢复服务');
   const scope = unique([...source.matchAll(new RegExp(`\\b${escape(restore[2])}=(${identifier})\\((${identifier})\\)`, 'g'))], '原生归档恢复作用域');
   const openError = [...new Set([...source.matchAll(new RegExp(`instanceof (${identifier})`, 'g'))].map((match) => match[1]))];
   const predicate = [...source.matchAll(new RegExp(`\\?\\.\\((${identifier})\\((${identifier})\\)\\?\`restored\`:null\\),\\1\\(\\2\\)\\?`, 'g'))];

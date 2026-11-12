@@ -50,7 +50,8 @@ export async function checkNativeAgentDetail(plan, directory) {
   const body = source.slice(start, end + 1);
   const cache = /\(0,([A-Za-z_$][\w$]*)\.c\)\(/.exec(body)?.[1];
   const jsxName = /\(0,([A-Za-z_$][\w$]*)\.jsx\)\(/.exec(body)?.[1];
-  const resume = /let\{isResuming:[^}]+\}=([A-Za-z_$][\w$]*)\(/.exec(body)?.[1];
+  const resume = /let\{isResuming:[^}]+\}=([A-Za-z_$][\w$]*)\(/.exec(body)?.[1]
+    ?? /let [\w$]+=([\w$]+)\([^;]+?\),\{isResuming:/.exec(body)?.[1];
   assert.ok(cache && jsxName && resume, '原生只读行为检查接入点缺失');
   const environment = {};
   for (const token of body.match(/[A-Za-z_$][\w$]*/g)) environment[token] = () => scope;

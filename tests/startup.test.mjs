@@ -52,7 +52,7 @@ test('远程界面在 90 秒仍未就绪时报告实际超时，关闭后不再�
 
 test('启动补丁只在 Linux SSH 宿主使用远程监控，结构缺失或歧义时拒绝', () => {
   const source = 'let s=new NativeGuard(u=>{this.logger.error("Webview renderer did not become ready",u)});'
-    + 'let a=e.onDidReceiveMessage(u=>{});return s;';
+    + 'let a=e.onDidReceiveMessage(u=>{});async function load(){e.html=await this.getWebviewContent(e)}return s;';
   const patched = patchWebviewStartup(source, 'api');
   for (const [platform, remoteName, expected] of [['linux', 'ssh-remote', 'remote'], ['linux', undefined, 'native'],
     ['win32', 'ssh-remote', 'native'], ['linux', 'wsl', 'native'], ['linux', 'dev-container', 'native']]) {
@@ -67,6 +67,9 @@ test('启动补丁只在 Linux SSH 宿主使用远程监控，结构缺失或歧
   assert.throws(() => patchWebviewStartup('', 'api'), /数量异常/);
   assert.throws(() => patchWebviewStartup(source + source, 'api'), /数量异常/);
   assert.throws(() => patchWebviewStartup(source.replace('let a=e.', 'let b=e.'), 'api'), /消息接入点/);
+  const current = source.replace('this.getWebviewContent(e)', 'readHtml(this.extensionUri,e,this.webviewMetaTags(e))');
+  assert.match(patchWebviewStartup(current, 'api'), /loadContent:\(\)=>readHtml\(this.extensionUri,e,this.webviewMetaTags\(e\)\)/);
+  assert.throws(() => patchWebviewStartup(source.replace('this.getWebviewContent(e)', 'unknown(e)'), 'api'), /内容加载接入点/);
 });
 
 function retryMessage(html) {

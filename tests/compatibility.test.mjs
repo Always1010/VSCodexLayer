@@ -13,7 +13,34 @@ import { patchProjectDraftReset } from '../adapters/draft-lifecycle.mjs';
 import { checkNativeDraftLifecycle } from '../tools/native-draft-lifecycle.mjs';
 import { archiveDependencies, patchMenuHeader, validateHeaderImports, portalDependency } from '../adapters/chat-menu.mjs';
 import { buildAgentDetailHeader, patchAgentDetailHeader } from '../adapters/agent-detail.mjs';
-import { patchSplitRouteScope, patchSplitComposerScope } from '../adapters/codex-compatible.mjs';
+import { nativeWslCheck, patchSplitNewChat, patchSplitRouteScope, patchSplitComposerScope } from '../adapters/codex-compatible.mjs';
+
+test('WSL 接入支持旧辅助函数和新版配置判断，Linux 不误用 Windows 设置', () => {
+  for (const source of ['function legacy(){return config("runCodexInWindowsSubsystemForLinux",!1)?1:0}',
+    'if(process.platform==="win32"&&config("runCodexInWindowsSubsystemForLinux",!1)){return}']) {
+    const check = nativeWslCheck(source);
+    for (const platform of ['linux', 'win32']) for (const enabled of [false, true]) {
+      assert.equal(vm.runInNewContext(check.expression, { process: { platform },
+        legacy: () => platform === 'win32' && enabled, config: () => enabled }), platform === 'win32' && enabled);
+    }
+  }
+  assert.throws(() => nativeWslCheck(''), /数量异常/);
+  assert.throws(() => nativeWslCheck('a("runCodexInWindowsSubsystemForLinux",!1);b("runCodexInWindowsSubsystemForLinux",!1)'), /数量异常/);
+});
+
+test('原生新聊天支持前置导航判断，项目草稿先由增强桥恢复', () => {
+  const source = 'function start(scope,options){if(scope.maps){scope.navigate();return}let{activeProject:p,prefillComposerMode:m}=options??{};scope.create(p,m)}';
+  const patched = patchSplitNewChat(source);
+  const calls = [];
+  let resume = true;
+  const context = vm.createContext({ globalThis: { __vscodexLayerBridge: { resumeDraft: () => resume } } });
+  vm.runInContext(patched, context);
+  const scope = { maps: true, navigate: () => calls.push('maps'), create: () => calls.push('new') };
+  context.start(scope, {}); assert.deepEqual(calls, []);
+  resume = false; context.start(scope, {}); assert.deepEqual(calls, ['maps']);
+  scope.maps = false; context.start(scope, {}); assert.deepEqual(calls, ['maps', 'new']);
+  assert.throws(() => patchSplitNewChat(source + source), /数量异常/);
+});
 
 test('缺少原生子聊天组件保留完整聊天入口，标题桥歧义时拒绝转换', async (t) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'vcl-agent-detail-'));
@@ -33,6 +60,7 @@ test('原生归档恢复接入缺失或歧义时拒绝生成补丁', () => {
     + 'error instanceof OpenError}export{init as n,footer as t};';
   assert.equal(archiveDependencies(source).service.exported, 'c');
   assert.equal(archiveDependencies(source).initializer, 'n', '导入必须使用公开导出名，不能使用内部函数名');
+  assert.deepEqual(archiveDependencies(source.replace('await service(', 'return service(')), archiveDependencies(source));
   const predicate = source.replace('e as OpenError', 'e as isOpenError')
     .replace('error instanceof OpenError', 'done?.(isOpenError(error)?`restored`:null),isOpenError(error)?partial():failed()');
   assert.equal(archiveDependencies(predicate).openErrorKind, 'predicate');
@@ -245,9 +273,9 @@ for (const [route, composer] of [
   const root = await extension(parent, 'future', {
     'out/extension.js': 'let a=e.onDidReceiveMessage(u=>{if(s.markMessageReceived(),rest',
     'webview/index.html': '<script type="module" src="./assets/index-new.js"></script>',
-    [`webview/assets/${route}`]: 'navigate-to-route /extension/panel/new routeTemplate',
+    [`webview/assets/${route}`]: 'listen(`navigate-to-route`,callback);let next;',
     [`webview/assets/${composer}`]: 'activeWorkspaceRoot selectedRemoteProject workspaceRoots',
-    'webview/assets/app-runtime-decoy.js': 'navigate-to-route /extension/panel/new',
+    'webview/assets/app-runtime-decoy.js': 'navigate-to-route /extension/panel/new routeTemplate',
     'webview/assets/composer-content-decoy.js': 'activeWorkspaceRoot workspaceRoots',
     'webview/assets/header-new.js': 'header.recentChats tasksQuery',
   });
@@ -272,6 +300,13 @@ test('推理摘要支持新旧模块，结构缺失、歧义或重复补丁时�
   }
   assert.throws(() => patchReasoningRenderer(renderer.replace('onToggle:', 'changedControl:')), /缺少/);
   assert.throws(() => patchReasoningRenderer(renderer.replace('8.75rem', 'unknown')), /固定高度滚动容器/);
+  const cachedRenderer = renderer.replace('z=y?', 'cachedItems=[{key:`reasoning-markdown`,node:md}],cachedHeight={preview:`8.75rem`,expanded:`8.75rem`,collapsed:`0px`},z=y?')
+    .replace('items:[{key:`reasoning-markdown`,node:md}]', 'items:cachedItems')
+    .replace('maxHeightByState:{preview:`8.75rem`,expanded:`8.75rem`,collapsed:`0px`}', 'maxHeightByState:cachedHeight');
+  const cachedPatch = patchReasoningRenderer(cachedRenderer).content;
+  assert.match(cachedPatch, /"data-vcl-reasoning-body":true,key:`reasoning-markdown`,children:md/);
+  assert.doesNotMatch(cachedPatch, /maxHeightByState:/);
+  assert.throws(() => patchReasoningRenderer(cachedRenderer.replace('8.75rem', 'unknown')), /缓存滚动高度/);
   const assistant = 'function render(p){let t=(0,Cache.c)(3),{item:n,assistantCopyText:r,turnId:i,cwd:d,conversationId:l,hostId:f}=p;return(0,JSX.jsx)(Body,{item:n})}function next(){}';
   assert.throws(() => patchReadTarget('unknown layout'), /数量异常/);
   assert.throws(() => patchReadTarget(assistant + assistant), /数量异常/);

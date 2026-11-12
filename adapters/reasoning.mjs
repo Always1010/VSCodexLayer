@@ -51,12 +51,18 @@ export function patchReasoningRenderer(source) {
   const visible = new RegExp(`(${identifier})=(${identifier})\\?!!(${identifier})&&\\((${identifier})==null\\|\\|\\4===\`resumed\`\\):(${identifier}),`, 'g');
   unique([...body.matchAll(visible)], '摘要正文可见状态');
   const scroller = new RegExp(`\\(0,${escaped(jsx)}\\.jsx\\)\\((${identifier}),\\{items:\\[\\{key:\`reasoning-markdown\`,node:(${identifier})\\}\\],autoScrollToBottom:${identifier},contentClassName:\`gap-0\`,maxHeightByState:\\{preview:\`8\\.75rem\`,expanded:\`8\\.75rem\`,collapsed:\`0px\`\\},viewState:\`expanded\`,className:\`\\[--edge-fade-distance:1rem\\]\`\\}\\)`, 'g');
-  unique([...body.matchAll(scroller)], '摘要固定高度滚动容器');
+  const cachedScroller = new RegExp(`\\(0,${escaped(jsx)}\\.jsx\\)\\(${identifier},\\{items:(${identifier}),autoScrollToBottom:${identifier},contentClassName:\`gap-0\`,maxHeightByState:(${identifier}),viewState:\`expanded\`,className:\`\\[--edge-fade-distance:1rem\\]\`\\}\\)`, 'g');
+  const scrollMatch = unique([...body.matchAll(scroller), ...body.matchAll(cachedScroller)], '摘要固定高度滚动容器');
+  let scrollNode = scrollMatch[2];
+  if (!scrollMatch[0].includes('items:[')) {
+    scrollNode = unique([...body.matchAll(new RegExp(`${escaped(scrollMatch[1])}=\\[\\{key:\`reasoning-markdown\`,node:(${identifier})\\}\\]`, 'g'))], '摘要缓存正文')[1];
+    unique([...body.matchAll(new RegExp(`${escaped(scrollMatch[2])}=\\{preview:\`8\\.75rem\`,expanded:\`8\\.75rem\`,collapsed:\`0px\`\\}`, 'g'))], '摘要缓存滚动高度');
+  }
   // One user-controlled state for live and completed items. Keep native Markdown,
   // but let the chat own vertical scrolling instead of nesting a 140px viewport.
   body = body.replace(disclosure, `$1=!!${item}.content.trim(),`)
     .replace(visible, '$1=$5,')
-    .replace(scroller, `(0,${jsx}.jsx)(\`div\`,{"data-vcl-reasoning-body":true,key:\`reasoning-markdown\`,children:$2})`);
+    .replace(scrollMatch[0], () => `(0,${jsx}.jsx)(\`div\`,{"data-vcl-reasoning-body":true,key:\`reasoning-markdown\`,children:${scrollNode}})`);
   const wrapper = `function __vclReasoningOff(){return!1}function __vclReasoningNoop(){return()=>{}}`
     + `function ${match[1]}(${match[2]}){let __vclBridge=globalThis.__vscodexLayerBridge;`
     + `let __vclEnabled=(0,${react}.useSyncExternalStore)(__vclBridge?.subscribeReasoning??__vclReasoningNoop,__vclBridge?.reasoningEnabled??__vclReasoningOff,__vclReasoningOff);`

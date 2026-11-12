@@ -54,7 +54,7 @@ export async function checkNativeChatMenu(plan) {
   }
   Object.assign(mocks, {
     [cache]: { c: (size) => Array(size).fill(Symbol.for('react.memo_cache_sentinel')) },
-    [react]: { useState: (value) => [value, (next) => { stateChanges.push(next); }] },
+    [react]: { useState: (value) => [value, (next) => { stateChanges.push(next); }], useRef: (value) => ({ current: value }) },
     [jsx]: { jsx: (type, props) => ({ type, props }), jsxs: (type, props) => ({ type, props }), Fragment: 'fragment' },
     [scopeHook]: () => scope,
     [actions]: () => ({ cancelPendingWorktree() {} }),

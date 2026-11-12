@@ -27,6 +27,7 @@ export async function checkNativeStartup(source, runtime, namespace) {
     codexMcpConnection: new Proxy({}, { get() { throw new Error('界面重试不得操作后端连接'); } }),
     logger: { warning: () => {}, error: () => {} },
     async getWebviewContent(target) { assert.equal(target, webview); loads++; return `<official-${loads}/>`; },
+    webviewMetaTags: () => [],
     registerClientCoordinationForWebview(target, close, startup) {
       assert.equal(target, webview); assert.equal(close, onDispose); assert.equal(startup, guard);
       assert.equal(sessions.size, 0); sessions.set(target, startup);
@@ -47,6 +48,8 @@ export async function checkNativeStartup(source, runtime, namespace) {
       assert.equal(file, '/fixture/out/vscodex-layer-host.cjs'); hostLoads++;
       return { createLayerHost: () => ({ handle: () => false, dispose() {} }) };
     } });
+  const contentLoader = /e\.html=await ([\w$]+)\(this\.extensionUri,e,this\.webviewMetaTags\(e\)\)/.exec(source)?.[1];
+  if (contentLoader) context[contentLoader] = (_uri, target) => provider.getWebviewContent(target);
   const initialize = vm.runInContext(`({${source.slice(begin, end)}}).initializeWebview`, context);
   for (const role of ['sidebar', 'panel']) {
     await initialize.call(provider, webview, role, onDispose);

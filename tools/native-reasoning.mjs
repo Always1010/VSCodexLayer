@@ -107,15 +107,17 @@ function checkNativeDisclosure(native, reactName, jsxName) {
   bindings[status[4]] = () => null;
   const label = match(/\?\([\w$]+=([\w$]+)\([\w$]+,[\w$]+\),[\w$]+\[\d+\]=/);
   bindings[label[1]] = () => 'Thought';
-  const layout = match(/\{elementHeightPx:[\w$]+,elementRef:[\w$]+\}=([\w$]+)\(\)/);
-  bindings[layout[1]] = () => ({ elementHeightPx: 100, elementRef: null });
+  const layout = /\{elementHeightPx:[\w$]+,elementRef:[\w$]+\}=([\w$]+)\(\)/.exec(native);
+  if (layout) bindings[layout[1]] = () => ({ elementHeightPx: 100, elementRef: null });
   const style = match(/=([\w$]+)\(([\w$]+)\.content,/);
   bindings[style[1]] = (...classes) => classes.join(' ');
   bindings[style[2]] = {};
   for (const [, component] of native.matchAll(/\.jsx\)\(([\w$]+),/g)) bindings[component] ??= component;
-  const motion = match(/\.jsx\)\(([\w$]+)\.div,/);
-  bindings[motion[1]] = { div: 'motion' };
-  bindings[match(/transition:([\w$]+),/)[1]] = {};
+  const motion = /\.jsx\)\(([\w$]+)\.div,/.exec(native);
+  if (motion) {
+    bindings[motion[1]] = { div: 'motion' };
+    bindings[match(/transition:([\w$]+),/)[1]] = {};
+  }
   const toggle = match(/onToggle:\(\)=>\{[\w$]+\(([\w$]+)\)\}/);
   bindings[toggle[1]] = (value) => !value;
   const context = vm.createContext(bindings);
@@ -124,6 +126,8 @@ function checkNativeDisclosure(native, reactName, jsxName) {
   function find(value, predicate) {
     if (value === null || typeof value !== 'object') return null;
     if (predicate(value)) return value;
+    // New builds delegate visibility to a native collapse instead of a ternary.
+    if (value.props?.expanded === false) return null;
     for (const child of Object.values(value)) {
       const found = find(child, predicate);
       if (found) return found;

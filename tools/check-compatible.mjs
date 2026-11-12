@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import vm from 'node:vm';
 import { createRequire } from 'node:module';
-import { buildCompatiblePatchPlan } from '../adapters/codex-compatible.mjs';
+import { buildCompatiblePatchPlan, nativeWslCheck } from '../adapters/codex-compatible.mjs';
 import { applyPatch, inspectPatch, readUnpatched, restorePatch, sha256 } from '../lib/patch-engine.mjs';
 import { findExtension } from './layer.mjs';
 import { checkProjectSubmit } from './native-project-submit.mjs';
@@ -33,7 +33,7 @@ assert.ok(hostNamespace, '宿主注入必须复用当前构建的 VS Code API �
 // Syntax and marker checks alone cannot detect undefined minified identifiers.
 const originalHost = (await readUnpatched(directory, 'out/extension.js')).toString();
 const originalNamespace = /let [A-Za-z_$][\w$]*=([A-Za-z_$][\w$]*)\.Uri\.joinPath\(this\.extensionUri,"webview"\)/.exec(originalHost)?.[1];
-const originalWslHelper = /function ([A-Za-z_$][\w$]*)\(\)\{return [A-Za-z_$][\w$]*\("runCodexInWindowsSubsystemForLinux",!1\)\?/.exec(originalHost)?.[1];
+const originalWslHelper = nativeWslCheck(originalHost).helper;
 assert.ok(originalNamespace && originalWslHelper, '官方宿主必须包含 VS Code API 和 WSL 运行模式判断');
 await checkNativeStartup(host, byPath('out/vscodex-layer-startup.cjs'), originalNamespace);
 const injectionStart = host.indexOf('let __vclHost;');
@@ -54,6 +54,7 @@ const provider = { extensionUri, subscriptions: [], extensionVersion: plan.exten
   logger: { warning: (message) => warnings.push(message) }, globalState: { get: () => ({}) },
   codexMcpConnection: { registerProvider: disposable, registerInternalNotificationHandler: disposable } };
 const context = vm.createContext({ provider, [originalNamespace]: vscode, [originalWslHelper]: () => backendInWsl,
+  process: { platform: process.platform },
   e: { postMessage: (message) => replies.push(message) }, n: disposable,
   require: (target) => {
     assert.equal(target, path.join(directory, 'out', 'vscodex-layer-host.cjs'));
@@ -67,6 +68,7 @@ try {
     ['ssh-remote', false, process.platform === 'linux'], ['dev-container', false, false]]) {
     vscode.env.remoteName = remoteName;
     backendInWsl = wsl;
+    context.process.platform = wsl ? 'win32' : process.platform;
     vscode.workspace.workspaceFolders = remoteName === 'ssh-remote'
       ? [{ name: 'Remote', uri: { scheme: 'file', authority: '', fsPath: '/home/ubuntu/project' } }]
       : [];
@@ -89,16 +91,17 @@ await checkNativeReasoning(plan);
 await checkNativeChatMenu(plan);
 
 const runtimeFiles = [];
+const dependencySources = {};
 for (const name of await fs.readdir(path.join(directory, 'webview', 'assets'))) {
   if (!['app-initial-', 'src-'].some((prefix) => name.startsWith(prefix)) || !name.endsWith('.js')) continue;
   const source = (await readUnpatched(directory, `webview/assets/${name}`)).toString();
   if (source.includes('canUseProjectlessWorkspace&&') && source.includes('createProjectlessThreadWorkspace')) runtimeFiles.push(source);
+  if (source.includes('saveThreadProjectAssignment:async(')) dependencySources[`webview/assets/${name}`] = source;
 }
 assert.equal(runtimeFiles.length, 1, '首次消息工作区运行时必须唯一');
 const regressionComposer = composer.replace(/baseParams:[\w$]+\.vclProjectCwd!==undefined\?\{\.\.\.([\w$]+),projectAssignment:undefined\}:[\w$]+,prepareFirstTurn:/,
   'baseParams:$1,prepareFirstTurn:');
 assert.notEqual(regressionComposer, composer);
-const dependencySources = {};
 for (const name of await fs.readdir(path.join(directory, 'webview', 'assets'))) {
   if (!['build-start-conversation-params-', 'app-server-manager-signals-'].some((prefix) => name.startsWith(prefix)) || !name.endsWith('.js')) continue;
   const relative = `webview/assets/${name}`;

@@ -39,7 +39,9 @@ export async function checkProjectSubmit(composer, runtime, expectedFirstTurnErr
     if (match[1] !== 'Error') bindings[match[1]] = class extends Error {};
   }
   bind(split ? `let ${id}=${id}\\?${id}:(${id}),` : `let ${id}=${id}\\?${id}:(${id});`, () => '/local/test');
-  bind(`=(${id})\\(${scope},${client}\\),${id}=${id}\\(${context}\\),`, () => async () => false);
+  const routeTemplate = new RegExp(`,${id}=${id}\\?${id}:(${id}),`).exec(entry);
+  if (routeTemplate) bindings[routeTemplate[1]] = '/local/:conversationId';
+  bind(`=(${id})\\(${scope},${id}\\),${id}=${id}\\(${context}\\),`, () => async () => false);
   bind(split ? `=(${id})\\(${context}\\),${id},${id},${id}=` : `=(${id})\\(${context}\\),${id},${id},${id},`, (context) => context.prompt);
   bind(`restoreMessage=(${id})\\(`, ({ context, cwd }) => ({ context, cwd }));
   bind(`\\(0,(${id})\\.default\\)\\(async`, { default: (fn) => fn });
@@ -51,7 +53,7 @@ export async function checkProjectSubmit(composer, runtime, expectedFirstTurnErr
   bind(`await (${id})\\(\\{scope:${scope},context:`, async (options) => ({ ...options,
     fileAttachments: [], addedFiles: [], input: [{ type: 'text', text: options.prompt }], config: {} }));
   if (!split) bind(`Promise\\.all\\(\\[${id},(${id})\\(\\{scope:`, async () => ({}));
-  bind(`let ${id}=(${id})\\(${scope},${client}\\)`, () => () => {});
+  bind(`(?:let |,)${id}=(${id})\\(${scope},${id}\\)`, () => () => {});
   bind(`==null\\?(${id})\\(${scope},${client},`, () => () => {});
   bind(`(${id})\\(${scope},${id}\\.workHomePolicyAcceptance\\)`, () => {});
   bind(`(${id})\\(${scope},${id}\\.openingPromptForHistory\\)`, () => undefined);
@@ -63,6 +65,12 @@ export async function checkProjectSubmit(composer, runtime, expectedFirstTurnErr
   bind(`let ${id}=(${id})\\(${context}\\.localProjectId,${id}\\.projectAssignment\\)`,
     (projectId, assignment) => projectId == null ? assignment : { projectKind: 'local', projectId });
   bind(`workspaceRoots:${id}\\}\\):(${id})\\(\\{hostId:`, () => { throw new Error('意外回退到目录分配'); });
+  const preparation = new RegExp(`let ${id},${id}=(${id})\\(${id}\\);try\\{`).exec(entry);
+  if (preparation) bindings[preparation[1]] = () => ({ settle() {}, settleError() {}, prepare: async (context) => context });
+  const goalContext = new RegExp(`await ${id}\\((${id})\\(${id}\\),${id}\\.mode`).exec(entry);
+  if (goalContext) bindings[goalContext[1]] = (context) => context;
+  const creationNotice = new RegExp(`let ${id}=(${id})\\(${scope},${id}\\.threadCreationHostId,${id}(?:,${id}!=null)?\\)`).exec(entry);
+  if (creationNotice) bindings[creationNotice[1]] = () => () => {};
   const paramsHelper = capture(entry, `,${params}=(${id})\\(\\{`);
   const membershipSources = [composer, ...Object.values(dependencySources)].filter((source) => source.includes('saveThreadProjectAssignment:async('));
   assert.equal(membershipSources.length, 1, '官方项目归属回调必须唯一');
