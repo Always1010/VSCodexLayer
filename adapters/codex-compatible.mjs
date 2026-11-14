@@ -8,7 +8,7 @@ import { buildChatMenuPatch } from './chat-menu.mjs';
 import { buildAgentDetailHeader } from './agent-detail.mjs';
 import { patchProjectDraftReset } from './draft-lifecycle.mjs';
 import { patchWebviewStartup } from './webview-startup.mjs';
-import { routeObserver } from '../lib/compatibility.mjs';
+import { hostBridge, routeObserver } from '../lib/compatibility.mjs';
 
 export const FAMILY = 'codex-webview-family-1';
 const identifier = String.raw`[A-Za-z_$][\w$]*`;
@@ -49,19 +49,19 @@ export function nativeWslCheck(source) {
 }
 
 function patchHost(source) {
-  const anchor = 'let a=e.onDidReceiveMessage(u=>{if(s.markMessageReceived(),';
-  const anchorMatches = [...source.matchAll(new RegExp(anchor.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'))];
+  const anchorMatches = [...source.matchAll(new RegExp(hostBridge.source, 'g'))];
   if (anchorMatches.length !== 1) throw new Error(`宿主消息桥接入点数量异常：${anchorMatches.length}`);
   const prefix = source.slice(Math.max(0, anchorMatches[0].index - 5000), anchorMatches[0].index);
   const namespaceMatches = [...prefix.matchAll(new RegExp(`let ${identifier}=(${identifier})\\.Uri\\.joinPath\\(this\\.extensionUri,"webview"\\)`, 'g'))];
   if (namespaceMatches.length !== 1) throw new Error(`VS Code API 命名空间数量异常：${namespaceMatches.length}`);
   const vscode = namespaceMatches[0][1];
   const isWsl = nativeWslCheck(source).expression;
-  source = replaceUnique(source, new RegExp(anchor.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')),
+  const message = anchorMatches[0][1];
+  source = replaceUnique(source, hostBridge, () =>
     `let __vclHost;try{__vclHost=require(${vscode}.Uri.joinPath(this.extensionUri,"out","vscodex-layer-host.cjs").fsPath)`
     + `.createLayerHost({vscode:${vscode},provider:this,webview:e,onDispose:n,isWsl:()=>${isWsl}});`
     + 'this.subscriptions.push(__vclHost)}catch(__vclError){this.logger.warning("VSCodexLayer host unavailable: "+String(__vclError?.stack??__vclError))}'
-    + 'let a=e.onDidReceiveMessage(u=>{if(__vclHost?.handle(u))return;if(s.markMessageReceived(),', '宿主消息桥');
+    + `let a=e.onDidReceiveMessage(${message}=>{if(__vclHost?.handle(${message}))return;if(s.markMessageReceived(),`, '宿主消息桥');
   return patchWebviewStartup(source, vscode);
 }
 
@@ -160,7 +160,7 @@ export function patchSplitComposerScope(source) {
 
 export function patchSplitNewChat(source) {
   return replaceUnique(source,
-    new RegExp(`function (${identifier})\\((${identifier}),(${identifier})\\)\\{(?=(?:(?!function ).){0,600}let\\{activeProject:${identifier},prefillComposerMode:)`),
+    new RegExp(`function (${identifier})\\((${identifier}),(${identifier})\\)\\{(?=(?:(?!function ).){0,600}let\\{activeProject:${identifier},(?:defaultCloudEnvironment:${identifier},)?prefillComposerMode:)`),
     (_all, name, scope, options) => `function ${name}(${scope},${options}){if(globalThis.__vscodexLayerBridge?.resumeDraft(${options}))return;`,
     '原生新聊天');
 }
@@ -178,8 +178,8 @@ export function patchProjectCreationMembership(source) {
   // A null assignment asks the desktop runtime to mark a thread projectless.
   // Directory-scoped IDE chats have no desktop project ID; leave membership unset.
   return replaceUnique(source,
-    new RegExp(`baseParams:(${identifier}),prepareFirstTurn:(${identifier})\\.worktreePrompt`),
-    (_all, params, context) => `baseParams:${context}.vclProjectCwd!==undefined?{...${params},projectAssignment:undefined}:${params},prepareFirstTurn:${context}.worktreePrompt`,
+    new RegExp(`baseParams:((${identifier})(?:\\?\\{\\.\\.\\.(${identifier}),input:\\[\\],commentAttachments:\\[\\],responseItems:\\[\\],toolOutput:void 0\\}:\\3)?),prepareFirstTurn:(${identifier})\\.worktreePrompt`),
+    (_all, params, condition, base, context) => `baseParams:${context}.vclProjectCwd!==undefined?{...${base ? `(${params})` : params},projectAssignment:undefined}:${params},prepareFirstTurn:${context}.worktreePrompt`,
     '项目聊天创建归属');
 }
 
@@ -269,11 +269,11 @@ function patchComposer(source) {
   return patchProjectCreationMembership(source);
 }
 
-function patchHeader(source) {
+export function patchHeader(source) {
   source = replaceUnique(source,
-    new RegExp(`(${identifier})&&\\(0,(${identifier})\\.jsx\\)\\(\`div\`,\\{children:\\(0,\\2\\.jsx\\)\\((${identifier}),\\{tasksQuery:(${identifier}),mergedTasks:(${identifier})\\}\\)\\}\\)`),
+    new RegExp(`(${identifier})&&\\(0,(${identifier})\\.jsx\\)\\(\`div\`,\\{children:\\(0,\\2\\.jsx\\)\\((${identifier}),\\{(tasksQuery:${identifier},)?mergedTasks:(${identifier})\\}\\)\\}\\)`),
     (_all, visible, jsx, component, query, tasks) =>
-      `${visible}&&(0,${jsx}.jsx)(\`div\`,{"data-vcl-home-history":true,children:(0,${jsx}.jsx)(${component},{tasksQuery:${query},mergedTasks:${tasks}})})`,
+      `${visible}&&(0,${jsx}.jsx)(\`div\`,{"data-vcl-home-history":true,children:(0,${jsx}.jsx)(${component},{${query ?? ''}mergedTasks:${tasks}})})`,
     '首页历史');
   source = replaceUnique(source,
     new RegExp(`\\(0,(${identifier})\\.jsx\\)\\((${identifier}),\\{id:\`header\\.recentChats\`,defaultMessage:\`Chats\`,description:\`Header label for recent tasks\`\\}\\)`),
@@ -294,7 +294,7 @@ export async function buildCompatiblePatchPlan(directory) {
   const route = choose(appFiles, (source) => routeObserver.test(source), '路由模块');
   const composer = choose(appFiles, (source) => (source.split('activeWorkspaceRoot').length - 1) >= 3
     && source.includes('startConversationWithPrimaryRuntimeForFirstTurn'), 'Composer 模块');
-  const header = choose(headerFiles, (source) => source.includes('header.recentChats') && source.includes('tasksQuery'), '首页模块');
+  const header = choose(headerFiles, (source) => source.includes('header.recentChats') && source.includes('mergedTasks:'), '首页模块');
   // Modern builds can split these roles or merge them back into app-initial.
   const splitRoute = !new RegExp(`function ${identifier}\\(\\{pathname:${identifier},routeTemplate:${identifier},search:${identifier}=`).test(route.bytes.toString());
   const mergedScopes = !splitRoute && route.bytes.toString().includes('homeDraftClientThreadId');

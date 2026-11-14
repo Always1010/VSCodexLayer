@@ -33,7 +33,7 @@ export function patchThreadMenu(source) {
   // The portal instance always has this flag. It must not register another set of
   // global shortcuts that would retarget the active chat's native commands.
   for (const helper of [command, shortcut]) body = body.replace(new RegExp(`\\b${escape(helper)}\\(`, 'g'), `__vclLayerMenu||${helper}(`);
-  const jsx = unique([...body.matchAll(new RegExp(`(${identifier})=\\(0,(${identifier})\\.jsx\\)\\(${identifier},\\{preserveBrowserContextMenu:!0,`, 'g'))], '原生菜单入口')[2];
+  const jsx = unique([...body.matchAll(new RegExp(`(${identifier})=(?:${identifier}&&)?\\(0,(${identifier})\\.jsx\\)\\(${identifier},\\{preserveBrowserContextMenu:!0,`, 'g'))], '原生菜单入口')[2];
   const menuGetter = unique([...body.matchAll(new RegExp(`getItems:(${identifier}),renderItem:`, 'g'))], '菜单项读取')[1];
   // The native sidebar surface includes permanent deletion with its own capability
   // checks and confirmation dialog; the header surface only offers archiving.

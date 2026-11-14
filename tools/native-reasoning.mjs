@@ -80,7 +80,7 @@ export async function checkNativeReasoning(plan) {
   context.__vscodexLayerBridge = undefined;
   assert.equal(render(props), null, '桥接缺失时保持官方视图');
   const native = functionSource(renderer, '__vclNativeReasoningSummary');
-  assert.ok(native.includes('onToggle:') && native.includes('disclosure:') && native.includes('reasoning-markdown'),
+  assert.ok(native.includes('onToggle:') && /(?:disclosure|externalDisclosure):/.test(native) && native.includes('reasoning-markdown'),
     '保留官方折叠和 Markdown 渲染组件');
   assert.match(native, /\.content\.trimStart\(\)/, '流式摘要不能丢弃标题');
   checkNativeDisclosure(native, reactName, jsxName);
@@ -92,7 +92,7 @@ function checkNativeDisclosure(native, reactName, jsxName) {
   let expanded = false;
   const bindings = {
     [reactName]: { useState: () => [expanded, (update) => { expanded = update(expanded); }] },
-    [jsxName]: { jsx: (type, props) => ({ type, props }), Fragment: 'fragment' },
+    [jsxName]: { jsx: (type, props) => ({ type, props }), jsxs: (type, props) => ({ type, props }), Fragment: 'fragment' },
   };
   const match = (pattern) => {
     const result = pattern.exec(native);
@@ -112,7 +112,7 @@ function checkNativeDisclosure(native, reactName, jsxName) {
   const style = match(/=([\w$]+)\(([\w$]+)\.content,/);
   bindings[style[1]] = (...classes) => classes.join(' ');
   bindings[style[2]] = {};
-  for (const [, component] of native.matchAll(/\.jsx\)\(([\w$]+),/g)) bindings[component] ??= component;
+  for (const [, component] of native.matchAll(/\.jsx[s]?\)\(([\w$]+),/g)) bindings[component] ??= component;
   const motion = /\.jsx\)\(([\w$]+)\.div,/.exec(native);
   if (motion) {
     bindings[motion[1]] = { div: 'motion' };
@@ -125,6 +125,7 @@ function checkNativeDisclosure(native, reactName, jsxName) {
   const render = (item) => context.__vclNativeReasoningSummary({ item, conversationId: 'history', hostId: 'local' });
   function find(value, predicate) {
     if (value === null || typeof value !== 'object') return null;
+    if (value.props?.externalDisclosure && !value.props.disclosure) value.props.disclosure = value.props.externalDisclosure;
     if (predicate(value)) return value;
     // New builds delegate visibility to a native collapse instead of a ternary.
     if (value.props?.expanded === false) return null;

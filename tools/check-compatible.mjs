@@ -99,7 +99,7 @@ for (const name of await fs.readdir(path.join(directory, 'webview', 'assets'))) 
   if (source.includes('saveThreadProjectAssignment:async(')) dependencySources[`webview/assets/${name}`] = source;
 }
 assert.equal(runtimeFiles.length, 1, '首次消息工作区运行时必须唯一');
-const regressionComposer = composer.replace(/baseParams:[\w$]+\.vclProjectCwd!==undefined\?\{\.\.\.([\w$]+),projectAssignment:undefined\}:[\w$]+,prepareFirstTurn:/,
+const regressionComposer = composer.replace(/baseParams:[\w$]+\.vclProjectCwd!==undefined\?\{\.\.\..+?,projectAssignment:undefined\}:(.+?),prepareFirstTurn:/,
   'baseParams:$1,prepareFirstTurn:');
 assert.notEqual(regressionComposer, composer);
 for (const name of await fs.readdir(path.join(directory, 'webview', 'assets'))) {

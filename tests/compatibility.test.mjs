@@ -13,7 +13,41 @@ import { patchProjectDraftReset } from '../adapters/draft-lifecycle.mjs';
 import { checkNativeDraftLifecycle } from '../tools/native-draft-lifecycle.mjs';
 import { archiveDependencies, patchMenuHeader, validateHeaderImports, portalDependency } from '../adapters/chat-menu.mjs';
 import { buildAgentDetailHeader, patchAgentDetailHeader } from '../adapters/agent-detail.mjs';
-import { nativeWslCheck, patchSplitNewChat, patchSplitRouteScope, patchSplitComposerScope } from '../adapters/codex-compatible.mjs';
+import { nativeWslCheck, patchHeader, patchProjectCreationMembership, patchSplitNewChat, patchSplitRouteScope, patchSplitComposerScope } from '../adapters/codex-compatible.mjs';
+
+test('首页历史支持移除 tasksQuery 的组件，保留原生参数和返回按钮', () => {
+  for (const query of ['', 'tasksQuery:query,']) {
+    const source = `history=show&&(0,J.jsx)(\`div\`,{children:(0,J.jsx)(History,{${query}mergedTasks:tasks})});`
+      + 'title=(0,J.jsx)(Message,{id:`header.recentChats`,defaultMessage:`Chats`,description:`Header label for recent tasks`});'
+      + 'back={onClick:click,"aria-label":label,children:icon};';
+    const run = { show: true, J: { jsx: (type, props) => ({ type, props }) }, History: 'History',
+      Message: 'Message', query: {}, tasks: [], click() {}, label: 'back', icon: {} };
+    vm.runInNewContext(patchHeader(source), run);
+    assert.equal(run.history.props['data-vcl-home-history'], true);
+    assert.equal(run.history.props.children.props.mergedTasks, run.tasks);
+    assert.equal(run.history.props.children.props.tasksQuery, query ? run.query : undefined);
+    assert.equal(run.back['data-vcl-chat-back'], true);
+    assert.equal(run.back.onClick, run.click);
+    assert.throws(() => patchHeader(source + source), /数量异常/);
+  }
+});
+
+test('项目首条发送移除空归属，同时保留新版条件输入参数', () => {
+  for (const expression of ['params', 'empty?{...params,input:[],commentAttachments:[],responseItems:[],toolOutput:void 0}:params']) {
+    const source = `({baseParams:${expression},prepareFirstTurn:context.worktreePrompt})`;
+    const patched = patchProjectCreationMembership(source);
+    for (const empty of [false, true]) for (const project of [false, true]) {
+      const params = { projectAssignment: null, input: ['message'], commentAttachments: ['comment'], responseItems: ['item'], toolOutput: 'output' };
+      const result = vm.runInNewContext(patched, { empty, params, context: project ? { vclProjectCwd: '/project' } : {} }).baseParams;
+      assert.equal(result.projectAssignment, project ? undefined : null);
+      const isEmpty = expression.includes('?') && empty;
+      assert.deepEqual(Array.from(result.input), isEmpty ? [] : params.input);
+      assert.deepEqual(Array.from(result.commentAttachments), isEmpty ? [] : params.commentAttachments);
+      assert.equal(result.toolOutput, isEmpty ? undefined : params.toolOutput);
+    }
+    assert.throws(() => patchProjectCreationMembership(source + source), /数量异常/);
+  }
+});
 
 test('WSL 接入支持旧辅助函数和新版配置判断，Linux 不误用 Windows 设置', () => {
   for (const source of ['function legacy(){return config("runCodexInWindowsSubsystemForLinux",!1)?1:0}',
@@ -40,6 +74,7 @@ test('原生新聊天支持前置导航判断，项目草稿先由增强桥恢�
   resume = false; context.start(scope, {}); assert.deepEqual(calls, ['maps']);
   scope.maps = false; context.start(scope, {}); assert.deepEqual(calls, ['maps', 'new']);
   assert.throws(() => patchSplitNewChat(source + source), /数量异常/);
+  assert.doesNotThrow(() => patchSplitNewChat(source.replace('activeProject:p,', 'activeProject:p,defaultCloudEnvironment:environment,')));
 });
 
 test('缺少原生子聊天组件保留完整聊天入口，标题桥歧义时拒绝转换', async (t) => {
@@ -277,7 +312,7 @@ for (const [route, composer] of [
     [`webview/assets/${composer}`]: 'activeWorkspaceRoot selectedRemoteProject workspaceRoots',
     'webview/assets/app-runtime-decoy.js': 'navigate-to-route /extension/panel/new routeTemplate',
     'webview/assets/composer-content-decoy.js': 'activeWorkspaceRoot workspaceRoots',
-    'webview/assets/header-new.js': 'header.recentChats tasksQuery',
+    'webview/assets/header-new.js': 'header.recentChats mergedTasks:',
   });
   const result = await probeCompatibility(root, 'supported');
   assert.equal(result.mode, 'unknown-version');
@@ -299,6 +334,7 @@ test('推理摘要支持新旧模块，结构缺失、歧义或重复补丁时�
     assert.throws(() => transform(patched), /数量异常/);
   }
   assert.throws(() => patchReasoningRenderer(renderer.replace('onToggle:', 'changedControl:')), /缺少/);
+  assert.doesNotThrow(() => patchReasoningRenderer(renderer.replace('disclosure:', 'externalDisclosure:')));
   assert.throws(() => patchReasoningRenderer(renderer.replace('8.75rem', 'unknown')), /固定高度滚动容器/);
   const cachedRenderer = renderer.replace('z=y?', 'cachedItems=[{key:`reasoning-markdown`,node:md}],cachedHeight={preview:`8.75rem`,expanded:`8.75rem`,collapsed:`0px`},z=y?')
     .replace('items:[{key:`reasoning-markdown`,node:md}]', 'items:cachedItems')

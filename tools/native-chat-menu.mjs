@@ -25,7 +25,7 @@ export async function checkNativeChatMenu(plan) {
   const pinShortcut = local(/__vclLayerMenu\?null:\(0,[\w$]+\.jsx\)\(([\w$]+),\{enabled:/);
   const atomHook = local(/([\w$]+)\([\w$]+,[\w$]+\)\?\.type===`active`/);
   const unreadState = local(/([\w$]+)\.canMarkUnread/);
-  const unreadAtom = local(new RegExp(`let ${unreadState}=[\\w$]+\\(([\\w$]+),`));
+  const unreadAtom = local(new RegExp(`let ${unreadState.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}=[\\w$]+\\(([\\w$]+),`));
   const menuBuilder = local(/await ([\w$]+)\(\{scope:/);
   const dialog = local(/([\w$]+)\([\w$]+,[\w$]+,\{draftKey:/);
   const command = local(/__vclLayerMenu\|\|([\w$]+)\(`rename-thread`/);

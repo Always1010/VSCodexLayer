@@ -69,6 +69,9 @@ test('启动补丁只在 Linux SSH 宿主使用远程监控，结构缺失或歧
   assert.throws(() => patchWebviewStartup(source.replace('let a=e.', 'let b=e.'), 'api'), /消息接入点/);
   const current = source.replace('this.getWebviewContent(e)', 'readHtml(this.extensionUri,e,this.webviewMetaTags(e))');
   assert.match(patchWebviewStartup(current, 'api'), /loadContent:\(\)=>readHtml\(this.extensionUri,e,this.webviewMetaTags\(e\)\)/);
+  const renamed = patchWebviewStartup(current.replace(/\bu\b/g, 'event'), 'api');
+  assert.match(renamed, /handleMessage\?\.\(event\)/);
+  assert.match(renamed, /\)\(event=>\{this\.logger\.error/);
   assert.throws(() => patchWebviewStartup(source.replace('this.getWebviewContent(e)', 'unknown(e)'), 'api'), /内容加载接入点/);
 });
 

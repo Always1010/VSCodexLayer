@@ -34,7 +34,7 @@ export function patchReasoningRenderer(source) {
   let body = source.slice(match.index, end + 1);
   const react = new RegExp(`\\(0,(${identifier})\\.useState\\)`).exec(body)?.[1];
   const jsx = new RegExp(`\\(0,(${identifier})\\.jsx\\)`).exec(body)?.[1];
-  if (!react || !jsx || !body.includes('onToggle:') || !body.includes('disclosure:')) {
+  if (!react || !jsx || !body.includes('onToggle:') || !/(?:disclosure|externalDisclosure):/.test(body)) {
     throw new Error('官方推理摘要组件缺少 React 或展开控件。');
   }
   const item = new RegExp(`\\{item:(${identifier}),`).exec(body)[1];

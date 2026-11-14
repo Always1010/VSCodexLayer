@@ -1,11 +1,11 @@
 // Keep the official watchdog for local and unsupported remote hosts.
 export function patchWebviewStartup(source, vscode) {
-  const pattern = /let s=new ([\w$]+)\(u=>\{this\.logger\.error\("Webview renderer did not become ready"/g;
+  const pattern = /let s=new ([\w$]+)\(([\w$]+)=>\{this\.logger\.error\("Webview renderer did not become ready"/g;
   if ([...source.matchAll(pattern)].length !== 1) throw new Error('界面启动监控接入点数量异常。');
   const loaders = [...source.matchAll(/e\.html=await (this\.getWebviewContent\(e\)|[\w$]+\(this\.extensionUri,e,this\.webviewMetaTags\(e\)\))/g)];
   if (loaders.length !== 1) throw new Error(`界面内容加载接入点数量异常：${loaders.length}`);
   const loadContent = loaders[0][1];
-  source = source.replace(pattern, (_match, nativeGuard) =>
+  source = source.replace(pattern, (_match, nativeGuard, timeoutEvent) =>
     `let s=new (process.platform==="linux"&&${vscode}.env.remoteName==="ssh-remote"?`
     + `require(${vscode}.Uri.joinPath(this.extensionUri,"out","vscodex-layer-startup.cjs").fsPath).createRemoteStartupGuard({`
     + 'onSlow:()=>{this.logger.warning("VSCodexLayer: remote renderer is still loading after 30000ms; waiting up to 90000ms");'
@@ -17,9 +17,9 @@ export function patchWebviewStartup(source, vscode) {
     + 'if(r==="sidebar"){for(let view of this.sidebarViews){if(view.webview===e)this.readySidebarViews.delete(view)}'
     + 'if(this.sidebarView?.webview===e)this.sidebarWebviewReady=false}'
     + 'else{let panel=this.findPanelByWebview(e);if(panel)this.editorPanels.get(panel).ready=false}}'
-    + `}):${nativeGuard})(u=>{`
+    + `}):${nativeGuard})(${timeoutEvent}=>{`
     + 'this.logger.error("Webview renderer did not become ready"');
-  const message = 'let a=e.onDidReceiveMessage(u=>{';
-  if (source.split(message).length !== 2) throw new Error('界面重试消息接入点数量异常。');
-  return source.replace(message, message + 'if(s.handleMessage?.(u))return;');
+  const message = /let a=e\.onDidReceiveMessage\(([\w$]+)=>\{/g;
+  if ([...source.matchAll(message)].length !== 1) throw new Error('界面重试消息接入点数量异常。');
+  return source.replace(message, (head, event) => head + `if(s.handleMessage?.(${event}))return;`);
 }

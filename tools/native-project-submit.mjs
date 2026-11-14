@@ -27,9 +27,11 @@ export async function checkProjectSubmit(composer, runtime, expectedFirstTurnErr
   const scope = capture(signature, `scope:(${id}),`);
   const client = capture(signature, `clientThreadId:(${id}),`);
   const context = capture(entry, `prepareFirstTurn:(${id})\\.worktreePrompt`);
-  const params = entry.includes('projectAssignment:undefined')
-    ? capture(entry, `\\.\\.\\.(${id}),projectAssignment:undefined`)
-    : capture(entry, `baseParams:(${id}),prepareFirstTurn:`);
+  const paramsExpression = /baseParams:(.+?),prepareFirstTurn:/.exec(entry)?.[1];
+  assert.ok(paramsExpression, '官方首次发送参数缺失');
+  const params = paramsExpression.includes('.vclProjectCwd!==undefined')
+    ? capture(paramsExpression, `\\?\\{\\.\\.\\.(?:\\(${id}\\?\\{\\.\\.\\.)?(${id}),`)
+    : capture(`baseParams:${paramsExpression}`, `baseParams:(?:${id}\\?\\{\\.\\.\\.)?(${id})`);
   const bindings = { DOMException, globalThis: { __vscodexLayerBridge: {
     async validateProject(cwd) { if (cwd === '/missing') throw new Error('目录已删除'); return { cwd }; },
   } } };
@@ -54,7 +56,7 @@ export async function checkProjectSubmit(composer, runtime, expectedFirstTurnErr
     fileAttachments: [], addedFiles: [], input: [{ type: 'text', text: options.prompt }], config: {} }));
   if (!split) bind(`Promise\\.all\\(\\[${id},(${id})\\(\\{scope:`, async () => ({}));
   bind(`(?:let |,)${id}=(${id})\\(${scope},${id}\\)`, () => () => {});
-  bind(`==null\\?(${id})\\(${scope},${client},`, () => () => {});
+  bind(`==null(?:&&!${id}\\.startWithoutFirstTurn)?\\?(${id})\\(${scope},${client},`, () => () => {});
   bind(`(${id})\\(${scope},${id}\\.workHomePolicyAcceptance\\)`, () => {});
   bind(`(${id})\\(${scope},${id}\\.openingPromptForHistory\\)`, () => undefined);
   bind(`cloudThreadPrototype===!0\\|\\|(${id})\\(`, (roots) => roots.every((root) => root === '~'));
@@ -65,7 +67,7 @@ export async function checkProjectSubmit(composer, runtime, expectedFirstTurnErr
   bind(`let ${id}=(${id})\\(${context}\\.localProjectId,${id}\\.projectAssignment\\)`,
     (projectId, assignment) => projectId == null ? assignment : { projectKind: 'local', projectId });
   bind(`workspaceRoots:${id}\\}\\):(${id})\\(\\{hostId:`, () => { throw new Error('意外回退到目录分配'); });
-  const preparation = new RegExp(`let ${id},${id}=(${id})\\(${id}\\);try\\{`).exec(entry);
+  const preparation = new RegExp(`let ${id},${id}=(${id})\\(${id}\\)[,;]`).exec(entry);
   if (preparation) bindings[preparation[1]] = () => ({ settle() {}, settleError() {}, prepare: async (context) => context });
   const goalContext = new RegExp(`await ${id}\\((${id})\\(${id}\\),${id}\\.mode`).exec(entry);
   if (goalContext) bindings[goalContext[1]] = (context) => context;
