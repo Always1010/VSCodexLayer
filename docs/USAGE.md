@@ -30,6 +30,16 @@ node tools/layer.mjs restore --confirm
 
 官方插件升级会切换到新的安装目录，已修改的旧版本不会自动迁移增强层。重新加载窗口后若只显示官方界面，先对实际启用的版本执行 `status` 和 `probe`；`status: original` 表示新版尚未应用补丁，只有 `patchCompatible: true` 后才能重新应用，不能把旧版文件或备份复制到新版。
 
+### 固定已验证版本
+
+需要长期保持当前增强界面时，先完成当前包的兼容验证及补丁应用，再在 VS Code 扩展详情中关闭 **Codex 单独的 Auto Update**。保留其他扩展的更新设置；以后需要新版本时手动更新，重新验证并应用补丁，然后再次固定。固定版本不会自动选择未来的“大版本”，升级时机由用户决定。预发布版本同样可以固定，固定期间仍保留原版本的功能范围。
+
+VS Code 支持从 CLI 安装指定版本并自动标记版本锁定；从本机 VSIX 安装也可用于固定版本。不要仅向已安装的同一版本重复执行 Marketplace 安装命令并假定锁定成功：CLI 可能直接报告已安装并跳过。应核对实际安装记录的 `metadata.pinned: true`，或通过扩展详情中的 Auto Update 状态确认。安装后重载窗口，让当前扩展宿主加载新的安装目录。[VS Code 版本锁定说明](https://code.visualstudio.com/updates/v1_75#_pin-an-extension-version-from-cli)、[单个扩展自动更新说明](https://code.visualstudio.com/docs/configure/extensions/extension-marketplace#_extension-autoupdate)。
+
+当前远程 Linux ARM64 固定版本为 `26.51111.21308`，安装在 `/home/ubuntu/.vscode-server/extensions/openai.chatgpt-26.51111.21308`，通过官方 CLI 从已校验的同版本缓存 VSIX 安装，跳过扩展包及依赖安装，安装记录已标记 `pinned: true`。VSIX 目录可没有平台后缀；默认发现会核对二进制平台和安装清单。
+
+恢复材料保存在 `/home/ubuntu/.local/share/vscodex-layer/releases/26.51111.21308-linux-arm64/`：原始 `openai.chatgpt-26.51111.21308-linux-arm64.vsix`、适配源码归档、版本及校验记录 `lock.json`，以及操作前的安装清单快照。插件目录内另有 `.vscodex-layer` 官方原件备份。需要重新安装时，先安装保存的同版 VSIX，再用对应源码运行 `apply --compatible --confirm`；安装原始 VSIX 本身不包含增强补丁。单独移除增强层使用 `restore --confirm`，版本锁定继续保留；恢复自动升级则在 Codex 扩展详情中启用 Auto Update。
+
 ## Remote SSH 使用
 
 支持 Windows VS Code 客户端通过 Remote SSH 连接 Rock 5B 等 Linux 主机。增强层必须随 Codex 扩展运行在远程工作区宿主；宿主检查要求当前扩展为 Workspace 类型、运行平台为 Linux、插件为该宿主的文件资源。VS Code 将客户端的 SSH 工作区 URI 转成远程宿主上的 `file:` URI 后传给扩展，因此工作区按当前宿主的绝对文件目录校验；客户端文件对应的 `vscode-local:` URI 与虚拟目录均拒绝。WSL、容器、虚拟工作区及运行在 Windows 客户端的 Codex 扩展暂不支持。可用 VS Code 的“Developer: Show Running Extensions”确认运行位置。
