@@ -210,6 +210,20 @@ test('发现当前未过期的最高版本而不选择残留目录', async (t) =
   assert.equal(result.candidates.length, 3);
 });
 
+test('锁定的 VSIX 目录没有平台后缀时，按真实二进制及安装清单发现', async (t) => {
+  const parent = await fs.mkdtemp(path.join(os.tmpdir(), 'vcl-pinned-vsix-'));
+  t.after(() => fs.rm(parent, { recursive: true, force: true }));
+  const original = await extension(parent, '26.51111.21308', { 'bin/linux-aarch64/codex': 'fixture' }, 'linux-arm64');
+  const root = path.join(parent, 'openai.chatgpt-26.51111.21308');
+  await fs.rename(original, root);
+  await fs.writeFile(path.join(parent, 'extensions.json'), JSON.stringify([{ identifier: { id: 'openai.chatgpt' },
+    version: '26.51111.21308', relativeLocation: path.basename(root), metadata: { source: 'vsix', pinned: true } }]));
+  assert.equal((await findInstalledExtension(parent, { platform: 'linux-arm64' })).root, root);
+  await assert.rejects(findInstalledExtension(parent, { platform: 'linux-x64' }), /未找到/);
+  await fs.writeFile(path.join(parent, '.obsolete'), JSON.stringify({ [path.basename(root)]: true }));
+  await assert.rejects(findInstalledExtension(parent, { platform: 'linux-arm64' }), /未找到/);
+});
+
 test('空过期标记视为无标记，损坏的安装或过期清单仍拒绝并指出文件', async (t) => {
   const parent = await fs.mkdtemp(path.join(os.tmpdir(), 'vscodex-empty-obsolete-'));
   t.after(() => fs.rm(parent, { recursive: true, force: true }));
